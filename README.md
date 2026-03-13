@@ -34,17 +34,22 @@ this approach eliminates process spawning overhead and temporary file locking, r
 ## setup
 
 1. build the project:
+   ```
+   $ git clone https://git.narl.io/nvrl/fluxo-rs
    $ cd fluxo-rs
    $ cargo build --release
+   ```
 
 2. start the daemon:
-   $ ./target/release/fluxo-rs daemon &
+   `$ ./target/release/fluxo-rs daemon &`
 
 3. configure waybar (config.jsonc):
+   ```
    "custom/cpu": {
        "exec": "/path/to/fluxo-rs cpu",
        "return-type": "json"
    }
+   ```
 
 ## development
 
@@ -63,7 +68,7 @@ this approach eliminates process spawning overhead and temporary file locking, r
 
 ### build and debug
 build for release:
-   $ cargo build --release
+   `$ cargo build --release`
 
 run with debug logs:
-   $ RUST_LOG=debug ./target/release/fluxo-rs daemon
+   `$ RUST_LOG=debug ./target/release/fluxo-rs daemon`
