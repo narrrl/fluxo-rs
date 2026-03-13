@@ -8,7 +8,7 @@ use std::process::Command;
 pub struct BtModule;
 
 impl WaybarModule for BtModule {
-    fn run(&self, _config: &Config, _state: &SharedState, args: &[&str]) -> Result<WaybarOutput> {
+    fn run(&self, config: &Config, _state: &SharedState, args: &[&str]) -> Result<WaybarOutput> {
         let action = args.first().unwrap_or(&"show");
 
         if *action == "disconnect" {
@@ -23,12 +23,11 @@ impl WaybarModule for BtModule {
             });
         }
 
-        // Check if bluetooth is powered on
         if let Ok(output) = Command::new("bluetoothctl").arg("show").output() {
             let stdout = String::from_utf8_lossy(&output.stdout);
             if stdout.contains("Powered: no") {
                 return Ok(WaybarOutput {
-                    text: "󰂲 Off".to_string(),
+                    text: config.bt.format_disabled.clone(),
                     tooltip: Some("Bluetooth Disabled".to_string()),
                     class: Some("disabled".to_string()),
                     percentage: None,
@@ -64,16 +63,17 @@ impl WaybarModule for BtModule {
                 battery.map(|b| format!("{}%", b)).unwrap_or_else(|| "N/A".to_string())
             );
 
+            let text = config.bt.format_connected.replace("{alias}", &alias);
+
             Ok(WaybarOutput {
-                text: format!("{} 󰂰", alias),
+                text,
                 tooltip: Some(tooltip),
                 class: Some("connected".to_string()),
                 percentage: battery,
             })
         } else {
-            // No device connected but Bluetooth is on
             Ok(WaybarOutput {
-                text: "󰂯".to_string(),
+                text: config.bt.format_disconnected.clone(),
                 tooltip: Some("Bluetooth On (Disconnected)".to_string()),
                 class: Some("disconnected".to_string()),
                 percentage: None,
@@ -83,7 +83,6 @@ impl WaybarModule for BtModule {
 }
 
 fn find_audio_device() -> Option<String> {
-    // 1. Try to check if current default sink is a bluetooth device
     if let Ok(output) = Command::new("pactl").arg("get-default-sink").output() {
         let sink = String::from_utf8_lossy(&output.stdout).trim().to_string();
         if sink.starts_with("bluez_output.") {
@@ -94,7 +93,6 @@ fn find_audio_device() -> Option<String> {
         }
     }
 
-    // 2. Fallback: Search bluetoothctl for connected devices with Audio Sink UUID
     if let Ok(output) = Command::new("bluetoothctl").args(["devices", "Connected"]).output() {
         let stdout = String::from_utf8_lossy(&output.stdout);
         for line in stdout.lines() {
@@ -104,7 +102,7 @@ fn find_audio_device() -> Option<String> {
                     let mac = parts[1];
                     if let Ok(info) = Command::new("bluetoothctl").args(["info", mac]).output() {
                         let info_str = String::from_utf8_lossy(&info.stdout);
-                        if info_str.contains("0000110b-0000-1000-8000-00805f9b34fb") { // Audio Sink UUID
+                        if info_str.contains("0000110b-0000-1000-8000-00805f9b34fb") {
                             return Some(mac.to_string());
                         }
                     }

@@ -20,56 +20,48 @@ impl WaybarModule for BudsModule {
                 let next_mode = match current_mode.as_str() {
                     "active" => "aware",
                     "aware" => "off",
-                    _ => "active", // default or off goes to active
+                    _ => "active",
                 };
                 
                 Command::new("pbpctrl").args(["set", "anc", next_mode]).status()?;
                 return Ok(WaybarOutput {
                     text: String::new(),
-                    tooltip: None,
-                    class: None,
-                    percentage: None,
+                    tooltip: None, class: None, percentage: None,
                 });
             }
             "connect" => {
                 Command::new("bluetoothctl").args(["connect", mac]).status()?;
                 return Ok(WaybarOutput {
                     text: String::new(),
-                    tooltip: None,
-                    class: None,
-                    percentage: None,
+                    tooltip: None, class: None, percentage: None,
                 });
             }
             "disconnect" => {
                 Command::new("bluetoothctl").args(["disconnect", mac]).status()?;
                 return Ok(WaybarOutput {
                     text: String::new(),
-                    tooltip: None,
-                    class: None,
-                    percentage: None,
+                    tooltip: None, class: None, percentage: None,
                 });
             }
             "show" | _ => {}
         }
 
-        // Check if connected
         let bt_info = Command::new("bluetoothctl").args(["info", mac]).output()?;
         let bt_str = String::from_utf8_lossy(&bt_info.stdout);
         
         if !bt_str.contains("Connected: yes") {
             return Ok(WaybarOutput {
-                text: "<span size='large'></span>".to_string(),
+                text: config.buds.format_disconnected.clone(),
                 tooltip: Some("Pixel Buds Pro 2 not connected".to_string()),
                 class: Some("disconnected".to_string()),
                 percentage: None,
             });
         }
 
-        // Get battery output
         let bat_cmd = Command::new("pbpctrl").args(["show", "battery"]).output();
         if bat_cmd.is_err() || !bat_cmd.as_ref().unwrap().status.success() {
             return Ok(WaybarOutput {
-                text: "<span size='large'></span>".to_string(),
+                text: config.buds.format_disconnected.clone(),
                 tooltip: Some("Pixel Buds Pro 2 connected (No Data)".to_string()),
                 class: Some("disconnected".to_string()),
                 percentage: None,
@@ -92,16 +84,13 @@ impl WaybarModule for BudsModule {
         if left_bud == "unknown" && right_bud == "unknown" {
             return Ok(WaybarOutput {
                 text: "{}".to_string(),
-                tooltip: None,
-                class: None,
-                percentage: None,
+                tooltip: None, class: None, percentage: None,
             });
         }
 
-        let left_display = if left_bud == "unknown" { "L: ---".to_string() } else { format!("L: {}", left_bud) };
-        let right_display = if right_bud == "unknown" { "R: ---".to_string() } else { format!("R: {}", right_bud) };
+        let left_display = if left_bud == "unknown" { "---".to_string() } else { format!("{}%", left_bud) };
+        let right_display = if right_bud == "unknown" { "---".to_string() } else { format!("{}%", right_bud) };
 
-        // Get ANC info
         let anc_cmd = Command::new("pbpctrl").args(["get", "anc"]).output()?;
         let current_mode = String::from_utf8_lossy(&anc_cmd.stdout).trim().to_string();
 
@@ -112,8 +101,13 @@ impl WaybarModule for BudsModule {
             _ => ("?", "anc-unknown"),
         };
 
+        let text = config.buds.format
+            .replace("{left}", &left_display)
+            .replace("{right}", &right_display)
+            .replace("{anc}", anc_icon);
+
         Ok(WaybarOutput {
-            text: format!("{} | {} | {}", left_display, right_display, anc_icon),
+            text,
             tooltip: Some("Pixel Buds Pro 2".to_string()),
             class: Some(class.to_string()),
             percentage: None,

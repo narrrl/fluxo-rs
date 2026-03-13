@@ -8,7 +8,7 @@ use std::process::Command;
 pub struct AudioModule;
 
 impl WaybarModule for AudioModule {
-    fn run(&self, _config: &Config, _state: &SharedState, args: &[&str]) -> Result<WaybarOutput> {
+    fn run(&self, config: &Config, _state: &SharedState, args: &[&str]) -> Result<WaybarOutput> {
         let target_type = args.first().unwrap_or(&"sink");
         let action = args.get(1).unwrap_or(&"show");
 
@@ -23,23 +23,21 @@ impl WaybarModule for AudioModule {
                 });
             }
             "show" | _ => {
-                self.get_status(target_type)
+                self.get_status(config, target_type)
             }
         }
     }
 }
 
 impl AudioModule {
-    fn get_status(&self, target_type: &str) -> Result<WaybarOutput> {
+    fn get_status(&self, config: &Config, target_type: &str) -> Result<WaybarOutput> {
         let target = if target_type == "sink" { "@DEFAULT_AUDIO_SINK@" } else { "@DEFAULT_AUDIO_SOURCE@" };
 
-        // Get volume and mute status via wpctl (faster than pactl for this)
         let output = Command::new("wpctl")
             .args(["get-volume", target])
             .output()?;
         let stdout = String::from_utf8_lossy(&output.stdout);
         
-        // Output format: "Volume: 0.50" or "Volume: 0.50 [MUTED]"
         let parts: Vec<&str> = stdout.trim().split_whitespace().collect();
         if parts.len() < 2 {
             return Err(anyhow!("Could not parse wpctl output: {}", stdout));
@@ -59,7 +57,8 @@ impl AudioModule {
 
         let (text, class) = if muted {
             let icon = if target_type == "sink" { "" } else { "" };
-            (format!("{} {}", name, icon), "muted")
+            let format_str = if target_type == "sink" { &config.audio.format_sink_muted } else { &config.audio.format_source_muted };
+            (format_str.replace("{name}", &name).replace("{icon}", icon), "muted")
         } else {
             let icon = if target_type == "sink" {
                 if display_vol <= 30 { "" }
@@ -68,7 +67,13 @@ impl AudioModule {
             } else {
                 ""
             };
-            (format!("{} {}% {}", name, display_vol, icon), "unmuted")
+            let format_str = if target_type == "sink" { &config.audio.format_sink_unmuted } else { &config.audio.format_source_unmuted };
+            let t = format_str
+                .replace("{name}", &name)
+                .replace("{icon}", icon)
+                .replace("{volume:>3}", &format!("{:>3}", display_vol))
+                .replace("{volume}", &format!("{}", display_vol));
+            (t, "unmuted")
         };
 
         Ok(WaybarOutput {
@@ -80,7 +85,6 @@ impl AudioModule {
     }
 
     fn get_description(&self, target_type: &str) -> Result<String> {
-        // Get the default device name
         let info_output = Command::new("pactl").arg("info").output()?;
         let info_stdout = String::from_utf8_lossy(&info_output.stdout);
         let search_key = if target_type == "sink" { "Default Sink:" } else { "Default Source:" };
@@ -91,7 +95,6 @@ impl AudioModule {
             .map(|s| s.trim())
             .ok_or_else(|| anyhow!("Default {} not found", target_type))?;
 
-        // Get the description of that device
         let list_cmd = if target_type == "sink" { "sinks" } else { "sources" };
         let list_output = Command::new("pactl").args(["list", list_cmd]).output()?;
         let list_stdout = String::from_utf8_lossy(&list_output.stdout);

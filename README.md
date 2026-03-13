@@ -1,58 +1,59 @@
 # fluxo-rs
 
-fluxo-rs is a high-performance system metrics daemon and client designed specifically for waybar. it replaces standard shell scripts with a compiled rust binary that collects data via a background polling loop and serves it over a unix domain socket (/tmp/fluxo.sock).
+fluxo-rs is a high-performance system metrics daemon and client designed specifically for waybar. It replaces standard shell scripts with a compiled rust binary that collects data via a background polling loop and serves it over a unix domain socket (`/tmp/fluxo.sock`).
 
-## description
+## Description
 
-the project follows a client-server architecture:
-- daemon: handles heavy lifting (polling cpu, memory, network, gpu) and stores state in memory.
-- client: a thin cli wrapper that connects to the daemon's socket to retrieve formatted json for waybar.
+The project follows a client-server architecture:
+- **Daemon**: Handles heavy lifting (polling cpu, memory, network, gpu) and stores state in memory.
+- **Client**: A thin cli wrapper that connects to the daemon's socket to retrieve formatted json for waybar.
 
-this approach eliminates process spawning overhead and temporary file locking, resulting in near-zero cpu usage for custom modules.
+This approach eliminates process spawning overhead and temporary file locking, resulting in near-zero cpu usage for custom modules.
 
-## features
+## Features
 
-- ultra-lightweight: background polling is highly optimized (e.g., O(1) process counting).
-- jitter-free: uses zero-width sentinels and figure spaces to prevent waybar from trimming padding.
-- configurable: customizable output formats via toml config.
-- live reload: configuration can be reloaded without restarting the daemon.
-- multi-vendor gpu: native support for intel (igpu), amd, and nvidia.
+- **Ultra-lightweight**: Background polling is highly optimized (e.g., O(1) process counting).
+- **Jitter-free**: Uses zero-width sentinels and figure spaces to prevent waybar from trimming padding.
+- **Configurable**: Fully customizable output formats via toml config.
+- **Interactive Menus**: Integrated support for selecting items (like Bluetooth devices) via external menus (e.g., Rofi, Wofi).
+- **Live Reload**: Configuration can be reloaded without restarting the daemon.
+- **Multi-vendor GPU**: Native support for intel (igpu), amd, and nvidia.
 
-## modules
+## Modules
 
-| command | description | tokens |
+| Command | Description | Tokens |
 | :--- | :--- | :--- |
-| `net` | network speed (rx/tx) | `{interface}`, `{ip}`, `{rx}`, `{tx}` |
-| `cpu` | cpu usage and temp | `{usage}`, `{temp}` |
-| `mem` | memory usage | `{used}`, `{total}` |
-| `gpu` | gpu utilization | `{usage}`, `{vram_used}`, `{vram_total}`, `{temp}` |
-| `sys` | system load and uptime | `{uptime}`, `{load1}`, `{load5}`, `{load15}` |
-| `disk` | disk usage (default: /) | `{mount}`, `{used}`, `{total}` |
-| `pool` | aggregate storage (btrfs) | `{used}`, `{total}` |
-| `vol` | audio output volume | `{percentage}`, `{icon}` |
-| `mic` | audio input volume | `{percentage}`, `{icon}` |
-| `bt` | bluetooth status | device name and battery |
-| `buds` | pixel buds pro control | left/right battery and anc state |
-| `power` | battery and ac status | `{percentage}`, `{icon}` |
-| `game` | hyprland gamemode status | active/inactive icon |
+| `net` | Network speed (rx/tx) | `{interface}`, `{ip}`, `{rx}`, `{tx}` |
+| `cpu` | CPU usage and temp | `{usage}`, `{temp}` |
+| `mem` | Memory usage | `{used}`, `{total}` |
+| `gpu` | GPU utilization | `{usage}`, `{vram_used}`, `{vram_total}`, `{temp}` |
+| `sys` | System load and uptime | `{uptime}`, `{load1}`, `{load5}`, `{load15}` |
+| `disk` | Disk usage (default: /) | `{mount}`, `{used}`, `{total}` |
+| `pool` | Aggregate storage (btrfs) | `{used}`, `{total}` |
+| `vol` | Audio output volume | `{name}`, `{volume}`, `{icon}` |
+| `mic` | Audio input volume | `{name}`, `{volume}`, `{icon}` |
+| `bt` | Bluetooth status | `{alias}` |
+| `buds` | Pixel Buds Pro control | `{left}`, `{right}`, `{anc}` |
+| `power` | Battery and AC status | `{percentage}`, `{icon}` |
+| `game` | Hyprland gamemode status | active/inactive icon strings |
 
-## setup
+## Setup
 
-1. build the project:
+1. Build the project:
    ```bash
    cd fluxo-rs
    cargo build --release
    ```
 
-2. start the daemon:
+2. Start the daemon:
    ```bash
    ./target/release/fluxo-rs daemon &
    ```
 
-3. configuration:
-   create `~/.config/fluxo/config.toml` (see `example.config.toml` for all options).
+3. Configuration:
+   Create `~/.config/fluxo/config.toml` (see `example.config.toml` for all default options).
 
-4. waybar configuration (`config.jsonc`):
+4. Waybar configuration (`config.jsonc`):
    ```json
    "custom/cpu": {
        "exec": "~/path/to/fluxo-rs cpu",
@@ -60,29 +61,31 @@ this approach eliminates process spawning overhead and temporary file locking, r
    }
    ```
 
-## development
+## Development
 
-### architecture
-- `src/main.rs`: entry point, cli parsing, and client-side formatting logic.
-- `src/daemon.rs`:uds listener, configuration management, and polling orchestration.
-- `src/ipc.rs`: unix domain socket communication logic.
-- `src/modules/`: individual metric implementations.
-- `src/state.rs`: shared thread-safe data structures.
+### Architecture
+- `src/main.rs`: Entry point, CLI parsing, interactive GUI spawns (menus), and client-side formatting logic.
+- `src/daemon.rs`: UDS listener, configuration management, and polling orchestration.
+- `src/ipc.rs`: Unix domain socket communication logic.
+- `src/utils.rs`: Generic GUI utilities (like the menu spawner).
+- `src/modules/`: Individual metric implementations.
+- `src/state.rs`: Shared thread-safe data structures.
 
-### adding a module
-1. add the required fields to `src/state.rs`.
-2. implement the `WaybarModule` trait in a new file in `src/modules/`.
-3. add polling logic to `src/modules/hardware.rs` or `src/daemon.rs`.
-4. register the new subcommand in `src/main.rs` and the router in `src/daemon.rs`.
+### Adding a Module
+1. Add the required config block to `src/config.rs`.
+2. Add the required state fields to `src/state.rs`.
+3. Implement the `WaybarModule` trait in a new file in `src/modules/`.
+4. Add polling logic to `src/modules/hardware.rs` or `src/daemon.rs`.
+5. Register the new subcommand in `src/main.rs` and the router in `src/daemon.rs`.
 
-### configuration reload
-the daemon can reload its configuration live:
+### Configuration Reload
+The daemon can reload its configuration live:
 ```bash
 fluxo-rs reload
 ```
 
-### logs
-run the daemon with debug logs for troubleshooting:
+### Logs
+Run the daemon with debug logs for troubleshooting:
 ```bash
 RUST_LOG=debug fluxo-rs daemon
 ```

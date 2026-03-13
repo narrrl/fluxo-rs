@@ -4,6 +4,7 @@ mod ipc;
 mod modules;
 mod output;
 mod state;
+mod utils;
 
 use clap::{Parser, Subcommand};
 use std::process;
@@ -116,7 +117,44 @@ fn main() {
         }
         Commands::Gpu => handle_ipc_response(ipc::request_data("gpu", &[])),
         Commands::Sys => handle_ipc_response(ipc::request_data("sys", &[])),
-        Commands::Bt { action } => handle_ipc_response(ipc::request_data("bt", &[action.clone()])),
+        Commands::Bt { action } => {
+            if action == "menu" {
+                // Client-side execution of the menu
+                let config = config::load_config();
+                
+                let devices_out = std::process::Command::new("bluetoothctl")
+                    .args(["devices"])
+                    .output()
+                    .expect("Failed to run bluetoothctl");
+                let stdout = String::from_utf8_lossy(&devices_out.stdout);
+                
+                let mut items = Vec::new();
+                for line in stdout.lines() {
+                    if line.starts_with("Device ") {
+                        let parts: Vec<&str> = line.splitn(3, ' ').collect();
+                        if parts.len() == 3 {
+                            // Format: "Alias (MAC)"
+                            items.push(format!("{} ({})", parts[2], parts[1]));
+                        }
+                    }
+                }
+
+                if !items.is_empty() {
+                    if let Ok(selected) = utils::show_menu("Connect BT:", &items, &config.general.menu_command) {
+                        if let Some(mac_start) = selected.rfind('(') {
+                            if let Some(mac_end) = selected.rfind(')') {
+                                let mac = &selected[mac_start + 1..mac_end];
+                                let _ = std::process::Command::new("bluetoothctl")
+                                    .args(["connect", mac])
+                                    .status();
+                            }
+                        }
+                    }
+                }
+                return; // Exit client after menu
+            }
+            handle_ipc_response(ipc::request_data("bt", &[action.clone()]));
+        }
         Commands::Buds { action } => handle_ipc_response(ipc::request_data("buds", &[action.clone()])),
         Commands::Power => handle_ipc_response(ipc::request_data("power", &[])),
         Commands::Game => handle_ipc_response(ipc::request_data("game", &[])),
@@ -129,13 +167,7 @@ fn handle_ipc_response(response: anyhow::Result<String>) {
             match serde_json::from_str::<serde_json::Value>(&json_str) {
                 Ok(mut val) => {
                     if let Some(text) = val.get_mut("text").and_then(|t| t.as_str()) {
-                        // Intelligent formatting:
-                        // Only replace spaces with Figure Spaces if they are part of padding (surrounded by spaces or at start).
-                        // If the text contains '<', we assume it's Pango markup and perform a safer replacement
-                        // that avoids breaking tags.
                         let processed_text = if text.contains('<') {
-                            // If it's markup, we only wrap in sentinels. 
-                            // Individual modules with markup shouldn't really have variable-width spaces inside tags.
                             text.to_string()
                         } else {
                             text.replace(' ', "\u{2007}")

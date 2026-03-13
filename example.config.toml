@@ -1,6 +1,11 @@
 # fluxo-rs example configuration
 # place this at ~/.config/fluxo/config.toml
 
+[general]
+# command used for interactive menus (e.g., bluetooth device selection)
+# tokens: {prompt}
+menu_command = "fuzzel --dmenu --prompt '{prompt}'"
+
 # network module (net)
 # tokens: {interface}, {ip}, {rx}, {tx}, {rx:>5.2}, {tx:>5.2}
 [network]
@@ -42,3 +47,30 @@ format = "{used:>4.0}G / {total:>4.0}G"
 # tokens: {percentage}, {icon}, {percentage:>3}
 [power]
 format = "{percentage:>3}%  {icon}"
+
+# audio module (vol / mic)
+# tokens: {name}, {volume}, {icon}, {volume:>3}
+[audio]
+format_sink_unmuted = "{name} {volume:>3}% {icon}"
+format_sink_muted = "{name} {icon}"
+format_source_unmuted = "{name} {volume:>3}% {icon}"
+format_source_muted = "{name} {icon}"
+
+# bluetooth module (bt)
+# tokens: {alias}
+[bt]
+format_connected = "{alias} 󰂰"
+format_disconnected = "󰂯"
+format_disabled = "󰂲 Off"
+
+# pixel buds module (buds)
+# tokens: {left}, {right}, {anc}
+[buds]
+mac = "B4:23:A2:09:D3:53"
+format = "{left} | {right} | {anc}"
+format_disconnected = "<span size='large'></span>"
+
+# gamemode module (game)
+[game]
+format_active = "<span size='large'>󰊖</span>"
+format_inactive = "<span size='large'></span>"

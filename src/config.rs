@@ -5,6 +5,8 @@ use std::path::PathBuf;
 #[derive(Deserialize, Default)]
 pub struct Config {
     #[serde(default)]
+    pub general: GeneralConfig,
+    #[serde(default)]
     pub network: NetworkConfig,
     #[serde(default)]
     pub cpu: CpuConfig,
@@ -22,6 +24,25 @@ pub struct Config {
     pub power: PowerConfig,
     #[serde(default)]
     pub buds: BudsConfig,
+    #[serde(default)]
+    pub audio: AudioConfig,
+    #[serde(default)]
+    pub bt: BtConfig,
+    #[serde(default)]
+    pub game: GameConfig,
+}
+
+#[derive(Deserialize)]
+pub struct GeneralConfig {
+    pub menu_command: String,
+}
+
+impl Default for GeneralConfig {
+    fn default() -> Self {
+        Self {
+            menu_command: "fuzzel --dmenu --prompt '{prompt}'".to_string(),
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -135,12 +156,67 @@ impl Default for PowerConfig {
 #[derive(Deserialize)]
 pub struct BudsConfig {
     pub mac: String,
+    pub format: String,
+    pub format_disconnected: String,
 }
 
 impl Default for BudsConfig {
     fn default() -> Self {
         Self {
             mac: "B4:23:A2:09:D3:53".to_string(),
+            format: "{left} | {right} | {anc}".to_string(),
+            format_disconnected: "<span size='large'></span>".to_string(),
+        }
+    }
+}
+
+#[derive(Deserialize)]
+pub struct AudioConfig {
+    pub format_sink_unmuted: String,
+    pub format_sink_muted: String,
+    pub format_source_unmuted: String,
+    pub format_source_muted: String,
+}
+
+impl Default for AudioConfig {
+    fn default() -> Self {
+        Self {
+            format_sink_unmuted: "{name} {volume:>3}% {icon}".to_string(),
+            format_sink_muted: "{name} {icon}".to_string(),
+            format_source_unmuted: "{name} {volume:>3}% {icon}".to_string(),
+            format_source_muted: "{name} {icon}".to_string(),
+        }
+    }
+}
+
+#[derive(Deserialize)]
+pub struct BtConfig {
+    pub format_connected: String,
+    pub format_disconnected: String,
+    pub format_disabled: String,
+}
+
+impl Default for BtConfig {
+    fn default() -> Self {
+        Self {
+            format_connected: "{alias} 󰂰".to_string(),
+            format_disconnected: "󰂯".to_string(),
+            format_disabled: "󰂲 Off".to_string(),
+        }
+    }
+}
+
+#[derive(Deserialize)]
+pub struct GameConfig {
+    pub format_active: String,
+    pub format_inactive: String,
+}
+
+impl Default for GameConfig {
+    fn default() -> Self {
+        Self {
+            format_active: "<span size='large'>󰊖</span>".to_string(),
+            format_inactive: "<span size='large'></span>".to_string(),
         }
     }
 }
