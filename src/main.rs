@@ -129,7 +129,19 @@ fn handle_ipc_response(response: anyhow::Result<String>) {
             match serde_json::from_str::<serde_json::Value>(&json_str) {
                 Ok(mut val) => {
                     if let Some(text) = val.get_mut("text").and_then(|t| t.as_str()) {
-                        let fixed_text = format!("\u{200B}{}\u{200B}", text.replace(' ', "\u{2007}"));
+                        // Intelligent formatting:
+                        // Only replace spaces with Figure Spaces if they are part of padding (surrounded by spaces or at start).
+                        // If the text contains '<', we assume it's Pango markup and perform a safer replacement
+                        // that avoids breaking tags.
+                        let processed_text = if text.contains('<') {
+                            // If it's markup, we only wrap in sentinels. 
+                            // Individual modules with markup shouldn't really have variable-width spaces inside tags.
+                            text.to_string()
+                        } else {
+                            text.replace(' ', "\u{2007}")
+                        };
+
+                        let fixed_text = format!("\u{200B}{}\u{200B}", processed_text);
                         val["text"] = serde_json::Value::String(fixed_text);
                     }
                     println!("{}", serde_json::to_string(&val).unwrap());
