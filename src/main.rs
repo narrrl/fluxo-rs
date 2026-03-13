@@ -75,7 +75,6 @@ enum Commands {
 }
 
 fn main() {
-    // Initialize professional logging
     tracing_subscriber::registry()
         .with(fmt::layer().with_target(false).pretty())
         .with(EnvFilter::from_default_env().add_directive(tracing::Level::INFO.into()))
@@ -91,21 +90,11 @@ fn main() {
                 process::exit(1);
             }
         }
-        Commands::Net => {
-            handle_ipc_response(ipc::request_data("net", &[]));
-        }
-        Commands::Cpu => {
-            handle_ipc_response(ipc::request_data("cpu", &[]));
-        }
-        Commands::Mem => {
-            handle_ipc_response(ipc::request_data("mem", &[]));
-        }
-        Commands::Disk { path } => {
-            handle_ipc_response(ipc::request_data("disk", &[path.clone()]));
-        }
-        Commands::Pool { kind } => {
-            handle_ipc_response(ipc::request_data("pool", &[kind.clone()]));
-        }
+        Commands::Net => handle_ipc_response(ipc::request_data("net", &[])),
+        Commands::Cpu => handle_ipc_response(ipc::request_data("cpu", &[])),
+        Commands::Mem => handle_ipc_response(ipc::request_data("mem", &[])),
+        Commands::Disk { path } => handle_ipc_response(ipc::request_data("disk", &[path.clone()])),
+        Commands::Pool { kind } => handle_ipc_response(ipc::request_data("pool", &[kind.clone()])),
         Commands::Vol { cycle } => {
             let action = if *cycle { "cycle" } else { "show" };
             handle_ipc_response(ipc::request_data("vol", &[action.to_string()]));
@@ -114,36 +103,34 @@ fn main() {
             let action = if *cycle { "cycle" } else { "show" };
             handle_ipc_response(ipc::request_data("mic", &[action.to_string()]));
         }
-        Commands::Gpu => {
-            handle_ipc_response(ipc::request_data("gpu", &[]));
-        }
-        Commands::Sys => {
-            handle_ipc_response(ipc::request_data("sys", &[]));
-        }
-        Commands::Bt { action } => {
-            handle_ipc_response(ipc::request_data("bt", &[action.clone()]));
-        }
-        Commands::Buds { action } => {
-            handle_ipc_response(ipc::request_data("buds", &[action.clone()]));
-        }
-        Commands::Power => {
-            handle_ipc_response(ipc::request_data("power", &[]));
-        }
-        Commands::Game => {
-            handle_ipc_response(ipc::request_data("game", &[]));
-        }
+        Commands::Gpu => handle_ipc_response(ipc::request_data("gpu", &[])),
+        Commands::Sys => handle_ipc_response(ipc::request_data("sys", &[])),
+        Commands::Bt { action } => handle_ipc_response(ipc::request_data("bt", &[action.clone()])),
+        Commands::Buds { action } => handle_ipc_response(ipc::request_data("buds", &[action.clone()])),
+        Commands::Power => handle_ipc_response(ipc::request_data("power", &[])),
+        Commands::Game => handle_ipc_response(ipc::request_data("game", &[])),
     }
 }
 
 fn handle_ipc_response(response: anyhow::Result<String>) {
     match response {
         Ok(json_str) => {
-            println!("{}", json_str);
+            match serde_json::from_str::<serde_json::Value>(&json_str) {
+                Ok(mut val) => {
+                    if let Some(text) = val.get_mut("text").and_then(|t| t.as_str()) {
+                        // 1. Replace regular spaces with Figure Spaces (\u2007) for perfect numeric alignment
+                        // 2. Wrap the text in Zero-Width Spaces (\u200B) to prevent Waybar from trimming
+                        let fixed_text = format!("\u{200B}{}\u{200B}", text.replace(' ', "\u{2007}"));
+                        val["text"] = serde_json::Value::String(fixed_text);
+                    }
+                    println!("{}", serde_json::to_string(&val).unwrap());
+                }
+                Err(_) => println!("{}", json_str),
+            }
         }
         Err(e) => {
-            // Provide a graceful fallback JSON if the daemon isn't running
             let err_out = output::WaybarOutput {
-                text: "Daemon offline".to_string(),
+                text: format!("\u{200B}Daemon offline ({})\u{200B}", e),
                 tooltip: Some(e.to_string()),
                 class: Some("error".to_string()),
                 percentage: None,
