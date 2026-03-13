@@ -8,6 +8,9 @@ pub mod audio;
 pub mod gpu;
 pub mod sys;
 pub mod bt;
+pub mod buds;
+pub mod power;
+pub mod game;
 
 use crate::config::Config;
 use crate::output::WaybarOutput;

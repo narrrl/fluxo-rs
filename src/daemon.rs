@@ -86,6 +86,9 @@ fn handle_request(module_name: &str, args: &[&str], state: &SharedState, config:
         "gpu" => crate::modules::gpu::GpuModule.run(config, state, args),
         "sys" => crate::modules::sys::SysModule.run(config, state, args),
         "bt" | "bluetooth" => crate::modules::bt::BtModule.run(config, state, args),
+        "buds" => crate::modules::buds::BudsModule.run(config, state, args),
+        "power" => crate::modules::power::PowerModule.run(config, state, args),
+        "game" => crate::modules::game::GameModule.run(config, state, args),
         _ => {
             warn!("Received request for unknown module: '{}'", module_name);
             Err(anyhow::anyhow!("Unknown module: {}", module_name))

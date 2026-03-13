@@ -63,6 +63,15 @@ enum Commands {
         #[arg(default_value = "show")]
         action: String,
     },
+    /// Pixel Buds Pro ANC and Battery
+    Buds {
+        #[arg(default_value = "show")]
+        action: String,
+    },
+    /// System power and battery status
+    Power,
+    /// Hyprland gamemode status
+    Game,
 }
 
 fn main() {
@@ -113,6 +122,15 @@ fn main() {
         }
         Commands::Bt { action } => {
             handle_ipc_response(ipc::request_data("bt", &[action.clone()]));
+        }
+        Commands::Buds { action } => {
+            handle_ipc_response(ipc::request_data("buds", &[action.clone()]));
+        }
+        Commands::Power => {
+            handle_ipc_response(ipc::request_data("power", &[]));
+        }
+        Commands::Game => {
+            handle_ipc_response(ipc::request_data("game", &[]));
         }
     }
 }
