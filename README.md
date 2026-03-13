@@ -41,7 +41,9 @@ this approach eliminates process spawning overhead and temporary file locking, r
    ```
 
 2. start the daemon:
-   `$ ./target/release/fluxo-rs daemon &`
+   ```
+   $ ./target/release/fluxo-rs daemon &
+   ```
 
 3. configure waybar (config.jsonc):
    ```
@@ -68,7 +70,11 @@ this approach eliminates process spawning overhead and temporary file locking, r
 
 ### build and debug
 build for release:
-   `$ cargo build --release`
+   ```
+   $ cargo build --release
+   ```
 
 run with debug logs:
-   `$ RUST_LOG=debug ./target/release/fluxo-rs daemon`
+   ```
+   $ RUST_LOG=debug ./target/release/fluxo-rs daemon
+   ```
