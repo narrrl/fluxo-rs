@@ -1,6 +1,7 @@
 use serde::Deserialize;
 use std::fs;
 use std::path::PathBuf;
+use tracing::{debug, info, warn};
 
 #[derive(Deserialize, Default)]
 pub struct Config {
@@ -221,18 +222,31 @@ impl Default for GameConfig {
     }
 }
 
-pub fn load_config() -> Config {
-    let config_dir = std::env::var("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| {
-            let home = std::env::var("HOME").unwrap_or_else(|_| String::from("/"));
-            PathBuf::from(home).join(".config")
-        });
-    let config_path = config_dir.join("fluxo/config.toml");
+pub fn load_config(custom_path: Option<PathBuf>) -> Config {
+    let config_path = custom_path.unwrap_or_else(|| {
+        let config_dir = std::env::var("XDG_CONFIG_HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| {
+                let home = std::env::var("HOME").unwrap_or_else(|_| String::from("/"));
+                PathBuf::from(home).join(".config")
+            });
+        config_dir.join("fluxo/config.toml")
+    });
 
-    if let Ok(content) = fs::read_to_string(config_path) {
-        toml::from_str(&content).unwrap_or_default()
+    if let Ok(content) = fs::read_to_string(&config_path) {
+        match toml::from_str(&content) {
+            Ok(cfg) => {
+                info!("Successfully loaded configuration from {:?}", config_path);
+                cfg
+            }
+            Err(e) => {
+                warn!("Failed to parse config at {:?}: {}", config_path, e);
+                warn!("Falling back to default configuration.");
+                Config::default()
+            }
+        }
     } else {
+        debug!("No config file found at {:?}, using default settings.", config_path);
         Config::default()
     }
 }

@@ -12,8 +12,9 @@ use std::sync::{Arc, RwLock};
 use std::thread;
 use std::time::Duration;
 use tracing::{info, warn, error, debug};
+use std::path::PathBuf;
 
-pub fn run_daemon() -> Result<()> {
+pub fn run_daemon(config_path: Option<PathBuf>) -> Result<()> {
     if fs::metadata(SOCKET_PATH).is_ok() {
         debug!("Removing stale socket file: {}", SOCKET_PATH);
         fs::remove_file(SOCKET_PATH)?;
@@ -21,9 +22,11 @@ pub fn run_daemon() -> Result<()> {
 
     let state: SharedState = Arc::new(RwLock::new(AppState::default()));
     let listener = UnixListener::bind(SOCKET_PATH)?;
-    let config = Arc::new(RwLock::new(crate::config::load_config()));
+    
+    // We store the original config_path to allow proper reloading later
+    let config_path_clone = config_path.clone();
+    let config = Arc::new(RwLock::new(crate::config::load_config(config_path)));
 
-    // Spawn the background polling thread
     let poll_state = Arc::clone(&state);
     thread::spawn(move || {
         info!("Starting background polling thread");
@@ -43,6 +46,7 @@ pub fn run_daemon() -> Result<()> {
             Ok(mut stream) => {
                 let state_clone = Arc::clone(&state);
                 let config_clone = Arc::clone(&config);
+                let cp_clone = config_path_clone.clone();
                 thread::spawn(move || {
                     let mut reader = BufReader::new(stream.try_clone().unwrap());
                     let mut request = String::new();
@@ -58,10 +62,13 @@ pub fn run_daemon() -> Result<()> {
                     if let Some(module_name) = parts.first() {
                         if *module_name == "reload" {
                             info!("Reloading configuration...");
-                            let new_config = crate::config::load_config();
+                            let new_config = crate::config::load_config(cp_clone);
                             if let Ok(mut config_lock) = config_clone.write() {
                                 *config_lock = new_config;
                                 let _ = stream.write_all(b"{\"text\":\"ok\"}");
+                                info!("Configuration reloaded successfully.");
+                            } else {
+                                error!("Failed to acquire write lock for configuration reload.");
                             }
                             return;
                         }
@@ -82,12 +89,10 @@ pub fn run_daemon() -> Result<()> {
 }
 
 fn handle_request(module_name: &str, args: &[&str], state: &SharedState, config_lock: &Arc<RwLock<Config>>) -> String {
-    debug!(module = module_name, args = ?args, "Handling request");
-    
     let config = if let Ok(c) = config_lock.read() {
         c
     } else {
-        // Fallback to default if lock fails (should not happen normally)
+        error!("Failed to acquire read lock for configuration.");
         return "{\"text\":\"error: config lock failed\"}".to_string();
     };
 
@@ -114,8 +119,9 @@ fn handle_request(module_name: &str, args: &[&str], state: &SharedState, config_
     match result {
         Ok(output) => serde_json::to_string(&output).unwrap_or_else(|_| "{}".to_string()),
         Err(e) => {
+            error!(module = module_name, error = %e, "Module execution failed");
             let err_out = crate::output::WaybarOutput {
-                text: "Error".to_string(),
+                text: format!("\u{200B}Error\u{200B}"),
                 tooltip: Some(e.to_string()),
                 class: Some("error".to_string()),
                 percentage: None,

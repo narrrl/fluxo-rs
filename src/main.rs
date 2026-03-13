@@ -7,6 +7,7 @@ mod state;
 mod utils;
 
 use clap::{Parser, Subcommand};
+use std::path::PathBuf;
 use std::process;
 use tracing::{error, info};
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
@@ -22,7 +23,11 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     /// Start the background polling daemon
-    Daemon,
+    Daemon {
+        /// Optional custom path to config.toml
+        #[arg(short, long)]
+        config: Option<PathBuf>,
+    },
     /// Reload the daemon configuration
     Reload,
     /// Network speed module
@@ -86,9 +91,9 @@ fn main() {
     let cli = Cli::parse();
 
     match &cli.command {
-        Commands::Daemon => {
+        Commands::Daemon { config } => {
             info!("Starting Fluxo daemon...");
-            if let Err(e) = daemon::run_daemon() {
+            if let Err(e) = daemon::run_daemon(config.clone()) {
                 error!("Daemon failed: {}", e);
                 process::exit(1);
             }
@@ -120,7 +125,7 @@ fn main() {
         Commands::Bt { action } => {
             if action == "menu" {
                 // Client-side execution of the menu
-                let config = config::load_config();
+                let config = config::load_config(None);
                 
                 let devices_out = std::process::Command::new("bluetoothctl")
                     .args(["devices"])
@@ -133,7 +138,6 @@ fn main() {
                     if line.starts_with("Device ") {
                         let parts: Vec<&str> = line.splitn(3, ' ').collect();
                         if parts.len() == 3 {
-                            // Format: "Alias (MAC)"
                             items.push(format!("{} ({})", parts[2], parts[1]));
                         }
                     }
@@ -150,8 +154,10 @@ fn main() {
                             }
                         }
                     }
+                } else {
+                    info!("No paired Bluetooth devices found.");
                 }
-                return; // Exit client after menu
+                return;
             }
             handle_ipc_response(ipc::request_data("bt", &[action.clone()]));
         }

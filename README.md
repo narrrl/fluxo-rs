@@ -15,7 +15,7 @@ This approach eliminates process spawning overhead and temporary file locking, r
 - **Ultra-lightweight**: Background polling is highly optimized (e.g., O(1) process counting).
 - **Jitter-free**: Uses zero-width sentinels and figure spaces to prevent waybar from trimming padding.
 - **Configurable**: Fully customizable output formats via toml config.
-- **Interactive Menus**: Integrated support for selecting items (like Bluetooth devices) via external menus (e.g., Rofi, Wofi).
+- **Interactive Menus**: Integrated support for selecting items (like Bluetooth devices) via external menus (e.g., Rofi, Wofi, Fuzzel).
 - **Live Reload**: Configuration can be reloaded without restarting the daemon.
 - **Multi-vendor GPU**: Native support for intel (igpu), amd, and nvidia.
 
@@ -47,7 +47,11 @@ This approach eliminates process spawning overhead and temporary file locking, r
 
 2. Start the daemon:
    ```bash
+   # Starts the daemon using the default config path (~/.config/fluxo/config.toml)
    ./target/release/fluxo-rs daemon &
+   
+   # Or provide a custom path
+   ./target/release/fluxo-rs daemon --config /path/to/your/config.toml &
    ```
 
 3. Configuration:
@@ -84,8 +88,9 @@ The daemon can reload its configuration live:
 fluxo-rs reload
 ```
 
-### Logs
-Run the daemon with debug logs for troubleshooting:
+### Logging & Debugging
+`fluxo-rs` uses the `tracing` ecosystem. If a module isn't behaving properly or your configuration isn't applying, start the daemon with debug logging enabled in the foreground:
 ```bash
 RUST_LOG=debug fluxo-rs daemon
 ```
+This will print verbose information regarding config parsing errors, subprocess failures, and IPC requests.
