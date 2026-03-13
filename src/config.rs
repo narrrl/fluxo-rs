@@ -20,6 +20,8 @@ pub struct Config {
     pub pool: PoolConfig,
     #[serde(default)]
     pub power: PowerConfig,
+    #[serde(default)]
+    pub buds: BudsConfig,
 }
 
 #[derive(Deserialize)]
@@ -126,6 +128,19 @@ impl Default for PowerConfig {
     fn default() -> Self {
         Self {
             format: "{percentage:>3}%  {icon}".to_string(),
+        }
+    }
+}
+
+#[derive(Deserialize)]
+pub struct BudsConfig {
+    pub mac: String,
+}
+
+impl Default for BudsConfig {
+    fn default() -> Self {
+        Self {
+            mac: "B4:23:A2:09:D3:53".to_string(),
         }
     }
 }

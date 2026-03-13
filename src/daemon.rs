@@ -21,8 +21,7 @@ pub fn run_daemon() -> Result<()> {
 
     let state: SharedState = Arc::new(RwLock::new(AppState::default()));
     let listener = UnixListener::bind(SOCKET_PATH)?;
-    let config = crate::config::load_config();
-    let config = Arc::new(config);
+    let config = Arc::new(RwLock::new(crate::config::load_config()));
 
     // Spawn the background polling thread
     let poll_state = Arc::clone(&state);
@@ -57,6 +56,16 @@ pub fn run_daemon() -> Result<()> {
 
                     let parts: Vec<&str> = request.split_whitespace().collect();
                     if let Some(module_name) = parts.first() {
+                        if *module_name == "reload" {
+                            info!("Reloading configuration...");
+                            let new_config = crate::config::load_config();
+                            if let Ok(mut config_lock) = config_clone.write() {
+                                *config_lock = new_config;
+                                let _ = stream.write_all(b"{\"text\":\"ok\"}");
+                            }
+                            return;
+                        }
+
                         debug!(module = module_name, args = ?&parts[1..], "Handling IPC request");
                         let response = handle_request(*module_name, &parts[1..], &state_clone, &config_clone);
                         if let Err(e) = stream.write_all(response.as_bytes()) {
@@ -72,23 +81,30 @@ pub fn run_daemon() -> Result<()> {
     Ok(())
 }
 
-fn handle_request(module_name: &str, args: &[&str], state: &SharedState, config: &Config) -> String {
+fn handle_request(module_name: &str, args: &[&str], state: &SharedState, config_lock: &Arc<RwLock<Config>>) -> String {
     debug!(module = module_name, args = ?args, "Handling request");
     
+    let config = if let Ok(c) = config_lock.read() {
+        c
+    } else {
+        // Fallback to default if lock fails (should not happen normally)
+        return "{\"text\":\"error: config lock failed\"}".to_string();
+    };
+
     let result = match module_name {
-        "net" | "network" => crate::modules::network::NetworkModule.run(config, state, args),
-        "cpu" => crate::modules::cpu::CpuModule.run(config, state, args),
-        "mem" | "memory" => crate::modules::memory::MemoryModule.run(config, state, args),
-        "disk" => crate::modules::disk::DiskModule.run(config, state, args),
-        "pool" | "btrfs" => crate::modules::btrfs::BtrfsModule.run(config, state, args),
-        "vol" => crate::modules::audio::AudioModule.run(config, state, &["sink", args.get(0).unwrap_or(&"show")]),
-        "mic" => crate::modules::audio::AudioModule.run(config, state, &["source", args.get(0).unwrap_or(&"show")]),
-        "gpu" => crate::modules::gpu::GpuModule.run(config, state, args),
-        "sys" => crate::modules::sys::SysModule.run(config, state, args),
-        "bt" | "bluetooth" => crate::modules::bt::BtModule.run(config, state, args),
-        "buds" => crate::modules::buds::BudsModule.run(config, state, args),
-        "power" => crate::modules::power::PowerModule.run(config, state, args),
-        "game" => crate::modules::game::GameModule.run(config, state, args),
+        "net" | "network" => crate::modules::network::NetworkModule.run(&config, state, args),
+        "cpu" => crate::modules::cpu::CpuModule.run(&config, state, args),
+        "mem" | "memory" => crate::modules::memory::MemoryModule.run(&config, state, args),
+        "disk" => crate::modules::disk::DiskModule.run(&config, state, args),
+        "pool" | "btrfs" => crate::modules::btrfs::BtrfsModule.run(&config, state, args),
+        "vol" => crate::modules::audio::AudioModule.run(&config, state, &["sink", args.get(0).unwrap_or(&"show")]),
+        "mic" => crate::modules::audio::AudioModule.run(&config, state, &["source", args.get(0).unwrap_or(&"show")]),
+        "gpu" => crate::modules::gpu::GpuModule.run(&config, state, args),
+        "sys" => crate::modules::sys::SysModule.run(&config, state, args),
+        "bt" | "bluetooth" => crate::modules::bt::BtModule.run(&config, state, args),
+        "buds" => crate::modules::buds::BudsModule.run(&config, state, args),
+        "power" => crate::modules::power::PowerModule.run(&config, state, args),
+        "game" => crate::modules::game::GameModule.run(&config, state, args),
         _ => {
             warn!("Received request for unknown module: '{}'", module_name);
             Err(anyhow::anyhow!("Unknown module: {}", module_name))

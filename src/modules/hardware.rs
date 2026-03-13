@@ -41,7 +41,6 @@ impl HardwareDaemon {
         let load_avg = System::load_average();
         let uptime = System::uptime();
         
-        // Fast O(1) process count by reading loadavg instead of heavy sysinfo process refresh
         let mut process_count = 0;
         if let Ok(loadavg_str) = std::fs::read_to_string("/proc/loadavg") {
             let parts: Vec<&str> = loadavg_str.split_whitespace().collect();
@@ -73,7 +72,6 @@ impl HardwareDaemon {
     fn poll_gpu(&mut self, gpu: &mut crate::state::GpuState) {
         gpu.active = false;
 
-        // Fast path: if we already detected NVIDIA, don't fallback to AMD/Intel scanning
         if self.gpu_vendor.as_deref() == Some("NVIDIA") || self.gpu_vendor.is_none() {
             if let Ok(output) = std::process::Command::new("nvidia-smi")
                 .args(["--query-gpu=utilization.gpu,memory.used,memory.total,temperature.gpu,name", "--format=csv,noheader,nounits"])
@@ -99,7 +97,6 @@ impl HardwareDaemon {
             }
         }
 
-        // Fast path: if we detected AMD or Intel, scan sysfs
         if self.gpu_vendor.as_deref() == Some("AMD") || self.gpu_vendor.as_deref() == Some("Intel") || self.gpu_vendor.is_none() {
             for i in 0..=3 {
                 let base = format!("/sys/class/drm/card{}/device", i);

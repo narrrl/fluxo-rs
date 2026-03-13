@@ -5,50 +5,57 @@ fluxo-rs is a high-performance system metrics daemon and client designed specifi
 ## description
 
 the project follows a client-server architecture:
-- daemon: handles heavy lifting (polling cpu, memory, network) and stores state in memory.
+- daemon: handles heavy lifting (polling cpu, memory, network, gpu) and stores state in memory.
 - client: a thin cli wrapper that connects to the daemon's socket to retrieve formatted json for waybar.
 
 this approach eliminates process spawning overhead and temporary file locking, resulting in near-zero cpu usage for custom modules.
 
+## features
+
+- ultra-lightweight: background polling is highly optimized (e.g., O(1) process counting).
+- jitter-free: uses zero-width sentinels and figure spaces to prevent waybar from trimming padding.
+- configurable: customizable output formats via toml config.
+- live reload: configuration can be reloaded without restarting the daemon.
+- multi-vendor gpu: native support for intel (igpu), amd, and nvidia.
+
 ## modules
 
-- net: network interface speed (rx/tx mb/s)
-- cpu: global usage percentage and package temperature
-- mem: used/total ram in gigabytes
-- disk: disk usage for a specific mountpoint
-- pool: aggregate storage usage (e.g., btrfs)
-- vol: audio output volume and device management
-- mic: audio input volume and device management
-
-## dependencies
-
-### system
-- iproute2 (for network interface discovery)
-- wireplumber (for volume and mute status via wpctl)
-- pulseaudio (for device description and cycling via pactl)
-- lm-sensors (recommended for cpu temperature)
-
-### rust
-- cargo / rustc (edition 2024)
+| command | description | tokens |
+| :--- | :--- | :--- |
+| `net` | network speed (rx/tx) | `{interface}`, `{ip}`, `{rx}`, `{tx}` |
+| `cpu` | cpu usage and temp | `{usage}`, `{temp}` |
+| `mem` | memory usage | `{used}`, `{total}` |
+| `gpu` | gpu utilization | `{usage}`, `{vram_used}`, `{vram_total}`, `{temp}` |
+| `sys` | system load and uptime | `{uptime}`, `{load1}`, `{load5}`, `{load15}` |
+| `disk` | disk usage (default: /) | `{mount}`, `{used}`, `{total}` |
+| `pool` | aggregate storage (btrfs) | `{used}`, `{total}` |
+| `vol` | audio output volume | `{percentage}`, `{icon}` |
+| `mic` | audio input volume | `{percentage}`, `{icon}` |
+| `bt` | bluetooth status | device name and battery |
+| `buds` | pixel buds pro control | left/right battery and anc state |
+| `power` | battery and ac status | `{percentage}`, `{icon}` |
+| `game` | hyprland gamemode status | active/inactive icon |
 
 ## setup
 
 1. build the project:
-   ```
-   $ git clone https://git.narl.io/nvrl/fluxo-rs
-   $ cd fluxo-rs
-   $ cargo build --release
+   ```bash
+   cd fluxo-rs
+   cargo build --release
    ```
 
 2. start the daemon:
-   ```
-   $ ./target/release/fluxo-rs daemon &
+   ```bash
+   ./target/release/fluxo-rs daemon &
    ```
 
-3. configure waybar (config.jsonc):
-   ```
+3. configuration:
+   create `~/.config/fluxo/config.toml` (see `example.config.toml` for all options).
+
+4. waybar configuration (`config.jsonc`):
+   ```json
    "custom/cpu": {
-       "exec": "/path/to/fluxo-rs cpu",
+       "exec": "~/path/to/fluxo-rs cpu",
        "return-type": "json"
    }
    ```
@@ -56,25 +63,26 @@ this approach eliminates process spawning overhead and temporary file locking, r
 ## development
 
 ### architecture
-- src/main.rs: entry point and cli argument parsing
-- src/daemon.rs: uds listener and background thread orchestration
-- src/ipc.rs: thin client socket communication
-- src/modules/: individual metric implementation logic
-- src/state.rs: shared in-memory data structures
+- `src/main.rs`: entry point, cli parsing, and client-side formatting logic.
+- `src/daemon.rs`:uds listener, configuration management, and polling orchestration.
+- `src/ipc.rs`: unix domain socket communication logic.
+- `src/modules/`: individual metric implementations.
+- `src/state.rs`: shared thread-safe data structures.
 
 ### adding a module
-1. define the state structure in state.rs
-2. implement the waybarmodule trait in src/modules/
-3. add the polling logic to the background thread in daemon.rs
-4. register the subcommand in main.rs
+1. add the required fields to `src/state.rs`.
+2. implement the `WaybarModule` trait in a new file in `src/modules/`.
+3. add polling logic to `src/modules/hardware.rs` or `src/daemon.rs`.
+4. register the new subcommand in `src/main.rs` and the router in `src/daemon.rs`.
 
-### build and debug
-build for release:
-   ```
-   $ cargo build --release
-   ```
+### configuration reload
+the daemon can reload its configuration live:
+```bash
+fluxo-rs reload
+```
 
-run with debug logs:
-   ```
-   $ RUST_LOG=debug ./target/release/fluxo-rs daemon
-   ```
+### logs
+run the daemon with debug logs for troubleshooting:
+```bash
+RUST_LOG=debug fluxo-rs daemon
+```

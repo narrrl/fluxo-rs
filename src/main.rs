@@ -22,6 +22,8 @@ struct Cli {
 enum Commands {
     /// Start the background polling daemon
     Daemon,
+    /// Reload the daemon configuration
+    Reload,
     /// Network speed module
     #[command(alias = "network")]
     Net,
@@ -90,6 +92,15 @@ fn main() {
                 process::exit(1);
             }
         }
+        Commands::Reload => {
+            match ipc::request_data("reload", &[]) {
+                Ok(_) => info!("Reload signal sent to daemon"),
+                Err(e) => {
+                    error!("Failed to send reload signal: {}", e);
+                    process::exit(1);
+                }
+            }
+        }
         Commands::Net => handle_ipc_response(ipc::request_data("net", &[])),
         Commands::Cpu => handle_ipc_response(ipc::request_data("cpu", &[])),
         Commands::Mem => handle_ipc_response(ipc::request_data("mem", &[])),
@@ -118,8 +129,6 @@ fn handle_ipc_response(response: anyhow::Result<String>) {
             match serde_json::from_str::<serde_json::Value>(&json_str) {
                 Ok(mut val) => {
                     if let Some(text) = val.get_mut("text").and_then(|t| t.as_str()) {
-                        // 1. Replace regular spaces with Figure Spaces (\u2007) for perfect numeric alignment
-                        // 2. Wrap the text in Zero-Width Spaces (\u200B) to prevent Waybar from trimming
                         let fixed_text = format!("\u{200B}{}\u{200B}", text.replace(' ', "\u{2007}"));
                         val["text"] = serde_json::Value::String(fixed_text);
                     }

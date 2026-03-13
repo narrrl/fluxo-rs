@@ -7,11 +7,10 @@ use std::process::Command;
 
 pub struct BudsModule;
 
-const MAC_ADDRESS: &str = "B4:23:A2:09:D3:53";
-
 impl WaybarModule for BudsModule {
-    fn run(&self, _config: &Config, _state: &SharedState, args: &[&str]) -> Result<WaybarOutput> {
+    fn run(&self, config: &Config, _state: &SharedState, args: &[&str]) -> Result<WaybarOutput> {
         let action = args.first().unwrap_or(&"show");
+        let mac = &config.buds.mac;
 
         match *action {
             "cycle_anc" => {
@@ -33,7 +32,7 @@ impl WaybarModule for BudsModule {
                 });
             }
             "connect" => {
-                Command::new("bluetoothctl").args(["connect", MAC_ADDRESS]).status()?;
+                Command::new("bluetoothctl").args(["connect", mac]).status()?;
                 return Ok(WaybarOutput {
                     text: String::new(),
                     tooltip: None,
@@ -42,7 +41,7 @@ impl WaybarModule for BudsModule {
                 });
             }
             "disconnect" => {
-                Command::new("bluetoothctl").args(["disconnect", MAC_ADDRESS]).status()?;
+                Command::new("bluetoothctl").args(["disconnect", mac]).status()?;
                 return Ok(WaybarOutput {
                     text: String::new(),
                     tooltip: None,
@@ -54,7 +53,7 @@ impl WaybarModule for BudsModule {
         }
 
         // Check if connected
-        let bt_info = Command::new("bluetoothctl").args(["info", MAC_ADDRESS]).output()?;
+        let bt_info = Command::new("bluetoothctl").args(["info", mac]).output()?;
         let bt_str = String::from_utf8_lossy(&bt_info.stdout);
         
         if !bt_str.contains("Connected: yes") {
