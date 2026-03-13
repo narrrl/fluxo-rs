@@ -5,6 +5,9 @@ pub mod hardware;
 pub mod disk;
 pub mod btrfs;
 pub mod audio;
+pub mod gpu;
+pub mod sys;
+pub mod bt;
 
 use crate::config::Config;
 use crate::output::WaybarOutput;

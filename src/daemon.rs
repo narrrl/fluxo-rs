@@ -83,6 +83,9 @@ fn handle_request(module_name: &str, args: &[&str], state: &SharedState, config:
         "pool" | "btrfs" => crate::modules::btrfs::BtrfsModule.run(config, state, args),
         "vol" => crate::modules::audio::AudioModule.run(config, state, &["sink", args.get(0).unwrap_or(&"show")]),
         "mic" => crate::modules::audio::AudioModule.run(config, state, &["source", args.get(0).unwrap_or(&"show")]),
+        "gpu" => crate::modules::gpu::GpuModule.run(config, state, args),
+        "sys" => crate::modules::sys::SysModule.run(config, state, args),
+        "bt" | "bluetooth" => crate::modules::bt::BtModule.run(config, state, args),
         _ => {
             warn!("Received request for unknown module: '{}'", module_name);
             Err(anyhow::anyhow!("Unknown module: {}", module_name))

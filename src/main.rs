@@ -53,6 +53,16 @@ enum Commands {
         #[arg(short, long)]
         cycle: bool,
     },
+    /// GPU usage, VRAM, and temp module
+    Gpu,
+    /// System load average and uptime
+    Sys,
+    /// Bluetooth audio device status
+    #[command(alias = "bluetooth")]
+    Bt {
+        #[arg(default_value = "show")]
+        action: String,
+    },
 }
 
 fn main() {
@@ -94,6 +104,15 @@ fn main() {
         Commands::Mic { cycle } => {
             let action = if *cycle { "cycle" } else { "show" };
             handle_ipc_response(ipc::request_data("mic", &[action.to_string()]));
+        }
+        Commands::Gpu => {
+            handle_ipc_response(ipc::request_data("gpu", &[]));
+        }
+        Commands::Sys => {
+            handle_ipc_response(ipc::request_data("sys", &[]));
+        }
+        Commands::Bt { action } => {
+            handle_ipc_response(ipc::request_data("bt", &[action.clone()]));
         }
     }
 }

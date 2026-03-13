@@ -114,7 +114,7 @@ impl AudioModule {
         let output = Command::new("pactl").args(["list", "short", list_cmd]).output()?;
         let stdout = String::from_utf8_lossy(&output.stdout);
 
-        let mut devices: Vec<String> = stdout.lines()
+        let devices: Vec<String> = stdout.lines()
             .filter_map(|l| {
                 let parts: Vec<&str> = l.split_whitespace().collect();
                 if parts.len() >= 2 {
