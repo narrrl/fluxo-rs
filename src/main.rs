@@ -1,0 +1,118 @@
+mod config;
+mod daemon;
+mod ipc;
+mod modules;
+mod output;
+mod state;
+
+use clap::{Parser, Subcommand};
+use std::process;
+use tracing::{error, info};
+use tracing_subscriber::{fmt, prelude::*, EnvFilter};
+
+#[derive(Parser)]
+#[command(name = "fluxo")]
+#[command(about = "A high-performance daemon/client for Waybar custom modules", long_about = None)]
+struct Cli {
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    /// Start the background polling daemon
+    Daemon,
+    /// Network speed module
+    #[command(alias = "network")]
+    Net,
+    /// CPU usage and temp module
+    Cpu,
+    /// Memory usage module
+    #[command(alias = "memory")]
+    Mem,
+    /// Disk usage module (path defaults to /)
+    Disk {
+        #[arg(default_value = "/")]
+        path: String,
+    },
+    /// Storage pool aggregate module (e.g., btrfs)
+    #[command(alias = "btrfs")]
+    Pool {
+        #[arg(default_value = "btrfs")]
+        kind: String,
+    },
+    /// Audio volume (sink) control
+    Vol {
+        /// Cycle to the next available output device
+        #[arg(short, long)]
+        cycle: bool,
+    },
+    /// Microphone (source) control
+    Mic {
+        /// Cycle to the next available input device
+        #[arg(short, long)]
+        cycle: bool,
+    },
+}
+
+fn main() {
+    // Initialize professional logging
+    tracing_subscriber::registry()
+        .with(fmt::layer().with_target(false).pretty())
+        .with(EnvFilter::from_default_env().add_directive(tracing::Level::INFO.into()))
+        .init();
+
+    let cli = Cli::parse();
+
+    match &cli.command {
+        Commands::Daemon => {
+            info!("Starting Fluxo daemon...");
+            if let Err(e) = daemon::run_daemon() {
+                error!("Daemon failed: {}", e);
+                process::exit(1);
+            }
+        }
+        Commands::Net => {
+            handle_ipc_response(ipc::request_data("net", &[]));
+        }
+        Commands::Cpu => {
+            handle_ipc_response(ipc::request_data("cpu", &[]));
+        }
+        Commands::Mem => {
+            handle_ipc_response(ipc::request_data("mem", &[]));
+        }
+        Commands::Disk { path } => {
+            handle_ipc_response(ipc::request_data("disk", &[path.clone()]));
+        }
+        Commands::Pool { kind } => {
+            handle_ipc_response(ipc::request_data("pool", &[kind.clone()]));
+        }
+        Commands::Vol { cycle } => {
+            let action = if *cycle { "cycle" } else { "show" };
+            handle_ipc_response(ipc::request_data("vol", &[action.to_string()]));
+        }
+        Commands::Mic { cycle } => {
+            let action = if *cycle { "cycle" } else { "show" };
+            handle_ipc_response(ipc::request_data("mic", &[action.to_string()]));
+        }
+    }
+}
+
+fn handle_ipc_response(response: anyhow::Result<String>) {
+    match response {
+        Ok(json_str) => {
+            println!("{}", json_str);
+        }
+        Err(e) => {
+            // Provide a graceful fallback JSON if the daemon isn't running
+            let err_out = output::WaybarOutput {
+                text: "Daemon offline".to_string(),
+                tooltip: Some(e.to_string()),
+                class: Some("error".to_string()),
+                percentage: None,
+            };
+            println!("{}", serde_json::to_string(&err_out).unwrap());
+            process::exit(1);
+        }
+    }
+}
