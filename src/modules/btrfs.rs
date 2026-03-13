@@ -8,7 +8,7 @@ use sysinfo::Disks;
 pub struct BtrfsModule;
 
 impl WaybarModule for BtrfsModule {
-    fn run(&self, _config: &Config, _state: &SharedState, _args: &[&str]) -> Result<WaybarOutput> {
+    fn run(&self, config: &Config, _state: &SharedState, _args: &[&str]) -> Result<WaybarOutput> {
         let disks = Disks::new_with_refreshed_list();
         let mut total_used: f64 = 0.0;
         let mut total_size: f64 = 0.0;
@@ -43,8 +43,14 @@ impl WaybarModule for BtrfsModule {
             "normal"
         };
 
+        let text = config.pool.format
+            .replace("{used:>4.0}", &format!("{:>4.0}", used_gb))
+            .replace("{total:>4.0}", &format!("{:>4.0}", size_gb))
+            .replace("{used}", &format!("{:.0}", used_gb))
+            .replace("{total}", &format!("{:.0}", size_gb));
+
         Ok(WaybarOutput {
-            text: format!("{:.0}G / {:.0}G", used_gb, size_gb),
+            text,
             tooltip: Some(format!("BTRFS Usage: {:.1}%", percentage)),
             class: Some(class.to_string()),
             percentage: Some(percentage as u8),

@@ -4,6 +4,7 @@ use sysinfo::{Components, System};
 pub struct HardwareDaemon {
     sys: System,
     components: Components,
+    gpu_vendor: Option<String>,
 }
 
 impl HardwareDaemon {
@@ -11,19 +12,17 @@ impl HardwareDaemon {
         let mut sys = System::new_all();
         sys.refresh_all();
         let components = Components::new_with_refreshed_list();
-        Self { sys, components }
+        Self { sys, components, gpu_vendor: None }
     }
 
     pub fn poll(&mut self, state: SharedState) {
         self.sys.refresh_cpu_usage();
         self.sys.refresh_memory();
-        self.sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
         self.components.refresh(true);
 
         let cpu_usage = self.sys.global_cpu_usage();
         let cpu_model = self.sys.cpus().first().map(|c| c.brand().to_string()).unwrap_or_else(|| "Unknown".to_string());
 
-        // Try to find a reasonable CPU temperature
         let mut cpu_temp = 0.0;
         for component in &self.components {
             let label = component.label().to_lowercase();
@@ -41,7 +40,17 @@ impl HardwareDaemon {
 
         let load_avg = System::load_average();
         let uptime = System::uptime();
-        let process_count = self.sys.processes().len();
+        
+        // Fast O(1) process count by reading loadavg instead of heavy sysinfo process refresh
+        let mut process_count = 0;
+        if let Ok(loadavg_str) = std::fs::read_to_string("/proc/loadavg") {
+            let parts: Vec<&str> = loadavg_str.split_whitespace().collect();
+            if parts.len() >= 4 {
+                if let Some(total_procs) = parts[3].split('/').nth(1) {
+                    process_count = total_procs.parse().unwrap_or(0);
+                }
+            }
+        }
 
         if let Ok(mut state_lock) = state.write() {
             state_lock.cpu.usage = cpu_usage as f64;
@@ -61,91 +70,99 @@ impl HardwareDaemon {
         }
     }
 
-    fn poll_gpu(&self, gpu: &mut crate::state::GpuState) {
+    fn poll_gpu(&mut self, gpu: &mut crate::state::GpuState) {
         gpu.active = false;
 
-        // 1. Try NVIDIA via nvidia-smi
-        if let Ok(output) = std::process::Command::new("nvidia-smi")
-            .args(["--query-gpu=utilization.gpu,memory.used,memory.total,temperature.gpu,name", "--format=csv,noheader,nounits"])
-            .output()
-        {
-            if output.status.success() {
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                if let Some(line) = stdout.lines().next() {
-                    let parts: Vec<&str> = line.split(',').collect();
-                    if parts.len() >= 5 {
-                        gpu.active = true;
-                        gpu.vendor = "NVIDIA".to_string();
-                        gpu.usage = parts[0].trim().parse().unwrap_or(0.0);
-                        gpu.vram_used = parts[1].trim().parse::<f64>().unwrap_or(0.0) / 1024.0; // from MB to GB
-                        gpu.vram_total = parts[2].trim().parse::<f64>().unwrap_or(0.0) / 1024.0;
-                        gpu.temp = parts[3].trim().parse().unwrap_or(0.0);
-                        gpu.model = parts[4].trim().to_string();
-                        return;
+        // Fast path: if we already detected NVIDIA, don't fallback to AMD/Intel scanning
+        if self.gpu_vendor.as_deref() == Some("NVIDIA") || self.gpu_vendor.is_none() {
+            if let Ok(output) = std::process::Command::new("nvidia-smi")
+                .args(["--query-gpu=utilization.gpu,memory.used,memory.total,temperature.gpu,name", "--format=csv,noheader,nounits"])
+                .output()
+            {
+                if output.status.success() {
+                    let stdout = String::from_utf8_lossy(&output.stdout);
+                    if let Some(line) = stdout.lines().next() {
+                        let parts: Vec<&str> = line.split(',').collect();
+                        if parts.len() >= 5 {
+                            gpu.active = true;
+                            gpu.vendor = "NVIDIA".to_string();
+                            gpu.usage = parts[0].trim().parse().unwrap_or(0.0);
+                            gpu.vram_used = parts[1].trim().parse::<f64>().unwrap_or(0.0) / 1024.0;
+                            gpu.vram_total = parts[2].trim().parse::<f64>().unwrap_or(0.0) / 1024.0;
+                            gpu.temp = parts[3].trim().parse().unwrap_or(0.0);
+                            gpu.model = parts[4].trim().to_string();
+                            self.gpu_vendor = Some("NVIDIA".to_string());
+                            return;
+                        }
                     }
                 }
             }
         }
 
-        // Iterate over sysfs for AMD or Intel
-        for i in 0..=3 {
-            let base = format!("/sys/class/drm/card{}/device", i);
-            
-            // 2. Try AMD
-            if let Ok(usage_str) = std::fs::read_to_string(format!("{}/gpu_busy_percent", base)) {
-                gpu.active = true;
-                gpu.vendor = "AMD".to_string();
-                gpu.usage = usage_str.trim().parse().unwrap_or(0.0);
+        // Fast path: if we detected AMD or Intel, scan sysfs
+        if self.gpu_vendor.as_deref() == Some("AMD") || self.gpu_vendor.as_deref() == Some("Intel") || self.gpu_vendor.is_none() {
+            for i in 0..=3 {
+                let base = format!("/sys/class/drm/card{}/device", i);
                 
-                if let Ok(mem_used) = std::fs::read_to_string(format!("{}/mem_info_vram_used", base)) {
-                    gpu.vram_used = mem_used.trim().parse::<f64>().unwrap_or(0.0) / 1024.0 / 1024.0 / 1024.0;
+                if self.gpu_vendor.as_deref() == Some("AMD") || self.gpu_vendor.is_none() {
+                    if let Ok(usage_str) = std::fs::read_to_string(format!("{}/gpu_busy_percent", base)) {
+                        gpu.active = true;
+                        gpu.vendor = "AMD".to_string();
+                        gpu.usage = usage_str.trim().parse().unwrap_or(0.0);
+                        
+                        if let Ok(mem_used) = std::fs::read_to_string(format!("{}/mem_info_vram_used", base)) {
+                            gpu.vram_used = mem_used.trim().parse::<f64>().unwrap_or(0.0) / 1024.0 / 1024.0 / 1024.0;
+                        }
+                        if let Ok(mem_total) = std::fs::read_to_string(format!("{}/mem_info_vram_total", base)) {
+                            gpu.vram_total = mem_total.trim().parse::<f64>().unwrap_or(0.0) / 1024.0 / 1024.0 / 1024.0;
+                        }
+                        
+                        if let Ok(entries) = std::fs::read_dir(format!("{}/hwmon", base)) {
+                            for entry in entries.flatten() {
+                                let temp_path = entry.path().join("temp1_input");
+                                if let Ok(temp_str) = std::fs::read_to_string(temp_path) {
+                                    gpu.temp = temp_str.trim().parse::<f64>().unwrap_or(0.0) / 1000.0;
+                                    break;
+                                }
+                            }
+                        }
+                        gpu.model = "AMD GPU".to_string();
+                        self.gpu_vendor = Some("AMD".to_string());
+                        return;
+                    }
                 }
-                if let Ok(mem_total) = std::fs::read_to_string(format!("{}/mem_info_vram_total", base)) {
-                    gpu.vram_total = mem_total.trim().parse::<f64>().unwrap_or(0.0) / 1024.0 / 1024.0 / 1024.0;
-                }
-                
-                if let Ok(entries) = std::fs::read_dir(format!("{}/hwmon", base)) {
-                    for entry in entries.flatten() {
-                        let temp_path = entry.path().join("temp1_input");
-                        if let Ok(temp_str) = std::fs::read_to_string(temp_path) {
-                            gpu.temp = temp_str.trim().parse::<f64>().unwrap_or(0.0) / 1000.0;
-                            break;
+
+                if self.gpu_vendor.as_deref() == Some("Intel") || self.gpu_vendor.is_none() {
+                    let freq_path = if std::path::Path::new(&format!("{}/gt_cur_freq_mhz", base)).exists() {
+                        Some(format!("{}/gt_cur_freq_mhz", base))
+                    } else if std::path::Path::new(&format!("/sys/class/drm/card{}/gt_cur_freq_mhz", i)).exists() {
+                        Some(format!("/sys/class/drm/card{}/gt_cur_freq_mhz", i))
+                    } else {
+                        None
+                    };
+
+                    if let Some(path) = freq_path {
+                        if let Ok(freq_str) = std::fs::read_to_string(&path) {
+                            gpu.active = true;
+                            gpu.vendor = "Intel".to_string();
+                            
+                            let cur_freq = freq_str.trim().parse::<f64>().unwrap_or(0.0);
+                            let mut max_freq = 0.0;
+                            
+                            let max_path = path.replace("gt_cur_freq_mhz", "gt_max_freq_mhz");
+                            if let Ok(max_str) = std::fs::read_to_string(max_path) {
+                                max_freq = max_str.trim().parse::<f64>().unwrap_or(0.0);
+                            }
+
+                            gpu.usage = if max_freq > 0.0 { (cur_freq / max_freq) * 100.0 } else { 0.0 };
+                            gpu.temp = 0.0;
+                            gpu.vram_used = 0.0;
+                            gpu.vram_total = 0.0;
+                            gpu.model = format!("Intel iGPU ({}MHz)", cur_freq);
+                            self.gpu_vendor = Some("Intel".to_string());
+                            return;
                         }
                     }
-                }
-                gpu.model = "AMD GPU".to_string();
-                return;
-            }
-
-            // 3. Try Intel (iGPU)
-            let freq_path = if std::path::Path::new(&format!("{}/gt_cur_freq_mhz", base)).exists() {
-                Some(format!("{}/gt_cur_freq_mhz", base))
-            } else if std::path::Path::new(&format!("/sys/class/drm/card{}/gt_cur_freq_mhz", i)).exists() {
-                Some(format!("/sys/class/drm/card{}/gt_cur_freq_mhz", i))
-            } else {
-                None
-            };
-
-            if let Some(path) = freq_path {
-                if let Ok(freq_str) = std::fs::read_to_string(&path) {
-                    gpu.active = true;
-                    gpu.vendor = "Intel".to_string();
-                    
-                    let cur_freq = freq_str.trim().parse::<f64>().unwrap_or(0.0);
-                    let mut max_freq = 0.0;
-                    
-                    let max_path = path.replace("gt_cur_freq_mhz", "gt_max_freq_mhz");
-                    if let Ok(max_str) = std::fs::read_to_string(max_path) {
-                        max_freq = max_str.trim().parse::<f64>().unwrap_or(0.0);
-                    }
-
-                    // Approximate usage via frequency scaling
-                    gpu.usage = if max_freq > 0.0 { (cur_freq / max_freq) * 100.0 } else { 0.0 };
-                    gpu.temp = 0.0; // Intel iGPU temps are usually tied to CPU package temp
-                    gpu.vram_used = 0.0; // iGPU shares system memory
-                    gpu.vram_total = 0.0;
-                    gpu.model = format!("Intel iGPU ({}MHz)", cur_freq);
-                    return;
                 }
             }
         }

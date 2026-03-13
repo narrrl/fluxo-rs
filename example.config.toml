@@ -1,0 +1,44 @@
+# fluxo-rs example configuration
+# place this at ~/.config/fluxo/config.toml
+
+# network module (net)
+# tokens: {interface}, {ip}, {rx}, {tx}, {rx:>5.2}, {tx:>5.2}
+[network]
+format = "{interface} ({ip}):  {rx:>5.2} MB/s   {tx:>5.2} MB/s"
+
+# cpu module (cpu)
+# tokens: {usage}, {temp}, {usage:>4.1}, {temp:>4.1}
+[cpu]
+format = "CPU: {usage:>4.1}% {temp:>4.1}C"
+
+# memory module (mem)
+# tokens: {used}, {total}, {used:>5.2}, {total:>5.2}
+[memory]
+format = "{used:>5.2}/{total:>5.2}GB"
+
+# gpu module (gpu)
+# tokens: {usage}, {vram_used}, {vram_total}, {temp}, {usage:>3.0}, {vram_used:>4.1}, {vram_total:>4.1}, {temp:>4.1}
+[gpu]
+format_amd = "AMD: {usage:>3.0}% {vram_used:>4.1}/{vram_total:>4.1}GB {temp:>4.1}C"
+format_intel = "iGPU: {usage:>3.0}%"
+format_nvidia = "NV: {usage:>3.0}% {vram_used:>4.1}/{vram_total:>4.1}GB {temp:>4.1}C"
+
+# system module (sys)
+# tokens: {uptime}, {load1}, {load5}, {load15}, {load1:>4.2}, {load5:>4.2}, {load15:>4.2}
+[sys]
+format = "UP: {uptime} | LOAD: {load1:>4.2} {load5:>4.2} {load15:>4.2}"
+
+# disk module (disk <path>)
+# tokens: {mount}, {used}, {total}, {used:>5.1}, {total:>5.1}
+[disk]
+format = "{mount} {used:>5.1}/{total:>5.1}G"
+
+# pool module (pool / btrfs)
+# tokens: {used}, {total}, {used:>4.0}, {total:>4.0}
+[pool]
+format = "{used:>4.0}G / {total:>4.0}G"
+
+# power/battery module (power)
+# tokens: {percentage}, {icon}, {percentage:>3}
+[power]
+format = "{percentage:>3}%  {icon}"

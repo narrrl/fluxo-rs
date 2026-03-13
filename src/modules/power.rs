@@ -8,7 +8,7 @@ use std::fs;
 pub struct PowerModule;
 
 impl WaybarModule for PowerModule {
-    fn run(&self, _config: &Config, _state: &SharedState, _args: &[&str]) -> Result<WaybarOutput> {
+    fn run(&self, config: &Config, _state: &SharedState, _args: &[&str]) -> Result<WaybarOutput> {
         let critical_threshold = 15;
         let warning_threshold = 50;
 
@@ -24,7 +24,7 @@ impl WaybarModule for PowerModule {
             }
         }
 
-        // Check AC status as fallback or TLP proxy
+        // Check AC status
         let mut ac_online = false;
         if let Ok(entries) = fs::read_dir("/sys/class/power_supply") {
             for entry in entries.flatten() {
@@ -59,7 +59,6 @@ impl WaybarModule for PowerModule {
             }
         };
 
-        // Read battery capacity and status
         let capacity_str = fs::read_to_string(bat_path.join("capacity")).unwrap_or_else(|_| "0".to_string());
         let percentage: u8 = capacity_str.trim().parse().unwrap_or(0);
         let status_str = fs::read_to_string(bat_path.join("status")).unwrap_or_else(|_| "Unknown".to_string());
@@ -90,8 +89,13 @@ impl WaybarModule for PowerModule {
             )
         };
 
+        let text = config.power.format
+            .replace("{percentage:>3}", &format!("{:>3}", percentage))
+            .replace("{percentage}", &format!("{}", percentage))
+            .replace("{icon}", icon);
+
         Ok(WaybarOutput {
-            text: format!("{}%  {}", percentage, icon),
+            text,
             tooltip: Some(tooltip),
             class: Some(class.to_string()),
             percentage: Some(percentage),

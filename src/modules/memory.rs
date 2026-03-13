@@ -7,7 +7,7 @@ use anyhow::Result;
 pub struct MemoryModule;
 
 impl WaybarModule for MemoryModule {
-    fn run(&self, _config: &Config, state: &SharedState, _args: &[&str]) -> Result<WaybarOutput> {
+    fn run(&self, config: &Config, state: &SharedState, _args: &[&str]) -> Result<WaybarOutput> {
         let (used_gb, total_gb) = {
             if let Ok(state_lock) = state.read() {
                 (
@@ -21,6 +21,12 @@ impl WaybarModule for MemoryModule {
 
         let ratio = if total_gb > 0.0 { (used_gb / total_gb) * 100.0 } else { 0.0 };
 
+        let text = config.memory.format
+            .replace("{used:>5.2}", &format!("{:>5.2}", used_gb))
+            .replace("{total:>5.2}", &format!("{:>5.2}", total_gb))
+            .replace("{used}", &format!("{:.2}", used_gb))
+            .replace("{total}", &format!("{:.2}", total_gb));
+
         let class = if ratio > 95.0 {
             "max"
         } else if ratio > 75.0 {
@@ -30,7 +36,7 @@ impl WaybarModule for MemoryModule {
         };
 
         Ok(WaybarOutput {
-            text: format!("{:.2}/{:.2}GB", used_gb, total_gb),
+            text,
             tooltip: None,
             class: Some(class.to_string()),
             percentage: Some(ratio as u8),

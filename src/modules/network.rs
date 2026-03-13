@@ -13,6 +13,8 @@ pub struct NetworkDaemon {
     last_time: u64,
     last_rx_bytes: u64,
     last_tx_bytes: u64,
+    cached_interface: Option<String>,
+    cached_ip: Option<String>,
 }
 
 impl NetworkDaemon {
@@ -21,40 +23,57 @@ impl NetworkDaemon {
             last_time: 0,
             last_rx_bytes: 0,
             last_tx_bytes: 0,
+            cached_interface: None,
+            cached_ip: None,
         }
     }
 
     pub fn poll(&mut self, state: SharedState) {
-        if let Ok(interface) = get_primary_interface() {
-            if !interface.is_empty() {
-                let time_now = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_secs();
+        // Cache invalidation: if the interface directory doesn't exist, clear cache
+        if let Some(ref iface) = self.cached_interface {
+            if !std::path::Path::new(&format!("/sys/class/net/{}", iface)).exists() {
+                self.cached_interface = None;
+                self.cached_ip = None;
+            }
+        }
 
-                if let Ok((rx_bytes_now, tx_bytes_now)) = get_bytes(&interface) {
-                    if self.last_time > 0 && time_now > self.last_time {
-                        let time_diff = time_now - self.last_time;
-                        let rx_bps = (rx_bytes_now.saturating_sub(self.last_rx_bytes)) / time_diff;
-                        let tx_bps = (tx_bytes_now.saturating_sub(self.last_tx_bytes)) / time_diff;
-
-                        let rx_mbps = (rx_bps as f64) / 1024.0 / 1024.0;
-                        let tx_mbps = (tx_bps as f64) / 1024.0 / 1024.0;
-
-                        debug!(interface, rx = rx_mbps, tx = tx_mbps, "Network stats updated");
-
-                        if let Ok(mut state_lock) = state.write() {
-                            state_lock.network.rx_mbps = rx_mbps;
-                            state_lock.network.tx_mbps = tx_mbps;
-                        }
-                    }
-
-                    self.last_time = time_now;
-                    self.last_rx_bytes = rx_bytes_now;
-                    self.last_tx_bytes = tx_bytes_now;
+        // Re-detect interface if needed
+        if self.cached_interface.is_none() {
+            if let Ok(iface) = get_primary_interface() {
+                if !iface.is_empty() {
+                    self.cached_interface = Some(iface.clone());
+                    self.cached_ip = get_ip_address(&iface);
                 }
+            }
+        }
+
+        if let Some(ref interface) = self.cached_interface {
+            let time_now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+
+            if let Ok((rx_bytes_now, tx_bytes_now)) = get_bytes(interface) {
+                if self.last_time > 0 && time_now > self.last_time {
+                    let time_diff = time_now - self.last_time;
+                    let rx_bps = (rx_bytes_now.saturating_sub(self.last_rx_bytes)) / time_diff;
+                    let tx_bps = (tx_bytes_now.saturating_sub(self.last_tx_bytes)) / time_diff;
+
+                    let rx_mbps = (rx_bps as f64) / 1024.0 / 1024.0;
+                    let tx_mbps = (tx_bps as f64) / 1024.0 / 1024.0;
+
+                    if let Ok(mut state_lock) = state.write() {
+                        state_lock.network.rx_mbps = rx_mbps;
+                        state_lock.network.tx_mbps = tx_mbps;
+                    }
+                }
+
+                self.last_time = time_now;
+                self.last_rx_bytes = rx_bytes_now;
+                self.last_tx_bytes = tx_bytes_now;
             } else {
-                warn!("No primary network interface found during poll");
+                // Read failed, might be down
+                self.cached_interface = None;
             }
         }
     }
@@ -87,6 +106,8 @@ impl WaybarModule for NetworkModule {
             .format
             .replace("{interface}", &interface)
             .replace("{ip}", &ip)
+            .replace("{rx:>5.2}", &format!("{:>5.2}", rx_mbps))
+            .replace("{tx:>5.2}", &format!("{:>5.2}", tx_mbps))
             .replace("{rx}", &format!("{:.2}", rx_mbps))
             .replace("{tx}", &format!("{:.2}", tx_mbps));
 

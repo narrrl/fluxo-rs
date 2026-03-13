@@ -8,7 +8,7 @@ use sysinfo::Disks;
 pub struct DiskModule;
 
 impl WaybarModule for DiskModule {
-    fn run(&self, _config: &Config, _state: &SharedState, args: &[&str]) -> Result<WaybarOutput> {
+    fn run(&self, config: &Config, _state: &SharedState, args: &[&str]) -> Result<WaybarOutput> {
         let mountpoint = args.first().unwrap_or(&"/");
         
         let disks = Disks::new_with_refreshed_list();
@@ -32,8 +32,15 @@ impl WaybarModule for DiskModule {
                     "normal"
                 };
 
+                let text = config.disk.format
+                    .replace("{mount}", mountpoint)
+                    .replace("{used:>5.1}", &format!("{:>5.1}", used_gb))
+                    .replace("{total:>5.1}", &format!("{:>5.1}", total_gb))
+                    .replace("{used}", &format!("{:.1}", used_gb))
+                    .replace("{total}", &format!("{:.1}", total_gb));
+
                 return Ok(WaybarOutput {
-                    text: format!("{} {:.1}G/{:.1}G", mountpoint, used_gb, total_gb),
+                    text,
                     tooltip: Some(format!("Used: {:.1}G\nTotal: {:.1}G\nFree: {:.1}G", used_gb, total_gb, free_gb)),
                     class: Some(class.to_string()),
                     percentage: Some(percentage as u8),

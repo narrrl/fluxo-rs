@@ -7,7 +7,7 @@ use anyhow::Result;
 pub struct SysModule;
 
 impl WaybarModule for SysModule {
-    fn run(&self, _config: &Config, state: &SharedState, _args: &[&str]) -> Result<WaybarOutput> {
+    fn run(&self, config: &Config, state: &SharedState, _args: &[&str]) -> Result<WaybarOutput> {
         let (load1, load5, load15, uptime_secs, process_count) = {
             if let Ok(state_lock) = state.read() {
                 (
@@ -30,8 +30,17 @@ impl WaybarModule for SysModule {
             format!("{}m", minutes)
         };
 
+        let text = config.sys.format
+            .replace("{uptime}", &uptime_str)
+            .replace("{load1:>4.2}", &format!("{:>4.2}", load1))
+            .replace("{load5:>4.2}", &format!("{:>4.2}", load5))
+            .replace("{load15:>4.2}", &format!("{:>4.2}", load15))
+            .replace("{load1}", &format!("{:.2}", load1))
+            .replace("{load5}", &format!("{:.2}", load5))
+            .replace("{load15}", &format!("{:.2}", load15));
+
         Ok(WaybarOutput {
-            text: format!("UP: {} | LOAD: {:.2} {:.2} {:.2}", uptime_str, load1, load5, load15),
+            text,
             tooltip: Some(format!(
                 "Uptime: {}\nProcesses: {}\nLoad Avg: {:.2}, {:.2}, {:.2}",
                 uptime_str, process_count, load1, load5, load15

@@ -7,7 +7,7 @@ use anyhow::Result;
 pub struct GpuModule;
 
 impl WaybarModule for GpuModule {
-    fn run(&self, _config: &Config, state: &SharedState, _args: &[&str]) -> Result<WaybarOutput> {
+    fn run(&self, config: &Config, state: &SharedState, _args: &[&str]) -> Result<WaybarOutput> {
         let (active, vendor, usage, vram_used, vram_total, temp, model) = {
             if let Ok(state_lock) = state.read() {
                 (
@@ -41,12 +41,21 @@ impl WaybarModule for GpuModule {
             "normal"
         };
 
-        let text = if vendor == "Intel" {
-            // Intel usually doesn't expose easy VRAM or Temp without root
-            format!("iGPU: {:.0}%", usage)
-        } else {
-            format!("{}: {:.0}% {:.1}/{:.1}GB {:.1}C", vendor, usage, vram_used, vram_total, temp)
+        let format_str = match vendor.as_str() {
+            "Intel" => &config.gpu.format_intel,
+            "NVIDIA" => &config.gpu.format_nvidia,
+            _ => &config.gpu.format_amd,
         };
+
+        let text = format_str
+            .replace("{usage:>3.0}", &format!("{:>3.0}", usage))
+            .replace("{vram_used:>4.1}", &format!("{:>4.1}", vram_used))
+            .replace("{vram_total:>4.1}", &format!("{:>4.1}", vram_total))
+            .replace("{temp:>4.1}", &format!("{:>4.1}", temp))
+            .replace("{usage}", &format!("{:.0}", usage))
+            .replace("{vram_used}", &format!("{:.1}", vram_used))
+            .replace("{vram_total}", &format!("{:.1}", vram_total))
+            .replace("{temp}", &format!("{:.1}", temp));
 
         let tooltip = if vendor == "Intel" {
             format!("Model: {}\nApprox Usage: {:.0}%", model, usage)
