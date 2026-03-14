@@ -144,7 +144,7 @@ fn main() {
                 }
 
                 if !items.is_empty() {
-                    if let Ok(selected) = utils::show_menu("Connect BT:", &items, &config.general.menu_command) {
+                    if let Ok(selected) = utils::show_menu("Connect BT: ", &items, &config.general.menu_command) {
                         if let Some(mac_start) = selected.rfind('(') {
                             if let Some(mac_end) = selected.rfind(')') {
                                 let mac = &selected[mac_start + 1..mac_end];
