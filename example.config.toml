@@ -1,6 +1,9 @@
 # fluxo-rs example configuration
 # place this at ~/.config/fluxo/config.toml
 
+# Note: All tokens support standard alignment, padding, and precision specifiers dynamically.
+# For example, you can change {rx:>5.2} to {rx:<8.1} or {used} to {used:^4.0} directly here.
+
 [general]
 # command used for interactive menus (e.g., bluetooth device selection)
 # tokens: {prompt}

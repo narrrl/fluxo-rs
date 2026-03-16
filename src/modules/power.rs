@@ -2,6 +2,7 @@ use crate::config::Config;
 use crate::modules::WaybarModule;
 use crate::output::WaybarOutput;
 use crate::state::SharedState;
+use crate::utils::{format_template, TokenValue};
 use anyhow::Result;
 use std::fs;
 
@@ -89,10 +90,13 @@ impl WaybarModule for PowerModule {
             )
         };
 
-        let text = config.power.format
-            .replace("{percentage:>3}", &format!("{:>3}", percentage))
-            .replace("{percentage}", &format!("{}", percentage))
-            .replace("{icon}", icon);
+        let text = format_template(
+            &config.power.format,
+            &[
+                ("percentage", TokenValue::Int(percentage as i64)),
+                ("icon", TokenValue::String(icon)),
+            ]
+        );
 
         Ok(WaybarOutput {
             text,

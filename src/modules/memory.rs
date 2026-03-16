@@ -2,6 +2,7 @@ use crate::config::Config;
 use crate::modules::WaybarModule;
 use crate::output::WaybarOutput;
 use crate::state::SharedState;
+use crate::utils::{format_template, TokenValue};
 use anyhow::Result;
 
 pub struct MemoryModule;
@@ -21,11 +22,13 @@ impl WaybarModule for MemoryModule {
 
         let ratio = if total_gb > 0.0 { (used_gb / total_gb) * 100.0 } else { 0.0 };
 
-        let text = config.memory.format
-            .replace("{used:>5.2}", &format!("{:>5.2}", used_gb))
-            .replace("{total:>5.2}", &format!("{:>5.2}", total_gb))
-            .replace("{used}", &format!("{:.2}", used_gb))
-            .replace("{total}", &format!("{:.2}", total_gb));
+        let text = format_template(
+            &config.memory.format,
+            &[
+                ("used", TokenValue::Float(used_gb)),
+                ("total", TokenValue::Float(total_gb)),
+            ]
+        );
 
         let class = if ratio > 95.0 {
             "max"

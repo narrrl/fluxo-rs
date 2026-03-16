@@ -2,6 +2,7 @@ use crate::config::Config;
 use crate::modules::WaybarModule;
 use crate::output::WaybarOutput;
 use crate::state::SharedState;
+use crate::utils::{format_template, TokenValue};
 use anyhow::Result;
 use std::process::Command;
 
@@ -101,10 +102,14 @@ impl WaybarModule for BudsModule {
             _ => ("?", "anc-unknown"),
         };
 
-        let text = config.buds.format
-            .replace("{left}", &left_display)
-            .replace("{right}", &right_display)
-            .replace("{anc}", anc_icon);
+        let text = format_template(
+            &config.buds.format,
+            &[
+                ("left", TokenValue::String(&left_display)),
+                ("right", TokenValue::String(&right_display)),
+                ("anc", TokenValue::String(anc_icon)),
+            ]
+        );
 
         Ok(WaybarOutput {
             text,

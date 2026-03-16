@@ -2,6 +2,7 @@ use crate::config::Config;
 use crate::modules::WaybarModule;
 use crate::output::WaybarOutput;
 use crate::state::SharedState;
+use crate::utils::{format_template, TokenValue};
 use anyhow::{Result, anyhow};
 use std::process::Command;
 
@@ -58,7 +59,14 @@ impl AudioModule {
         let (text, class) = if muted {
             let icon = if target_type == "sink" { "" } else { "" };
             let format_str = if target_type == "sink" { &config.audio.format_sink_muted } else { &config.audio.format_source_muted };
-            (format_str.replace("{name}", &name).replace("{icon}", icon), "muted")
+            let t = format_template(
+                format_str,
+                &[
+                    ("name", TokenValue::String(&name)),
+                    ("icon", TokenValue::String(icon)),
+                ]
+            );
+            (t, "muted")
         } else {
             let icon = if target_type == "sink" {
                 if display_vol <= 30 { "" }
@@ -68,11 +76,14 @@ impl AudioModule {
                 ""
             };
             let format_str = if target_type == "sink" { &config.audio.format_sink_unmuted } else { &config.audio.format_source_unmuted };
-            let t = format_str
-                .replace("{name}", &name)
-                .replace("{icon}", icon)
-                .replace("{volume:>3}", &format!("{:>3}", display_vol))
-                .replace("{volume}", &format!("{}", display_vol));
+            let t = format_template(
+                format_str,
+                &[
+                    ("name", TokenValue::String(&name)),
+                    ("icon", TokenValue::String(icon)),
+                    ("volume", TokenValue::Int(display_vol as i64)),
+                ]
+            );
             (t, "unmuted")
         };
 

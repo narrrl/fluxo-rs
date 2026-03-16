@@ -2,10 +2,10 @@ use crate::config::Config;
 use crate::modules::WaybarModule;
 use crate::output::WaybarOutput;
 use crate::state::SharedState;
+use crate::utils::{format_template, TokenValue};
 use anyhow::Result;
 use std::fs;
 use std::time::{SystemTime, UNIX_EPOCH};
-use tracing::{debug, warn};
 
 pub struct NetworkModule;
 
@@ -101,15 +101,15 @@ impl WaybarModule for NetworkModule {
             }
         };
 
-        let mut output_text = config
-            .network
-            .format
-            .replace("{interface}", &interface)
-            .replace("{ip}", &ip)
-            .replace("{rx:>5.2}", &format!("{:>5.2}", rx_mbps))
-            .replace("{tx:>5.2}", &format!("{:>5.2}", tx_mbps))
-            .replace("{rx}", &format!("{:.2}", rx_mbps))
-            .replace("{tx}", &format!("{:.2}", tx_mbps));
+        let mut output_text = format_template(
+            &config.network.format,
+            &[
+                ("interface", TokenValue::String(&interface)),
+                ("ip", TokenValue::String(&ip)),
+                ("rx", TokenValue::Float(rx_mbps)),
+                ("tx", TokenValue::Float(tx_mbps)),
+            ]
+        );
 
         if interface.starts_with("tun")
             || interface.starts_with("wg")

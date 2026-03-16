@@ -2,6 +2,7 @@ use crate::config::Config;
 use crate::modules::WaybarModule;
 use crate::output::WaybarOutput;
 use crate::state::SharedState;
+use crate::utils::{format_template, TokenValue};
 use anyhow::Result;
 use std::process::Command;
 
@@ -63,7 +64,10 @@ impl WaybarModule for BtModule {
                 battery.map(|b| format!("{}%", b)).unwrap_or_else(|| "N/A".to_string())
             );
 
-            let text = config.bt.format_connected.replace("{alias}", &alias);
+            let text = format_template(
+                &config.bt.format_connected,
+                &[("alias", TokenValue::String(&alias))]
+            );
 
             Ok(WaybarOutput {
                 text,

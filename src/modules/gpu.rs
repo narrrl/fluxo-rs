@@ -2,6 +2,7 @@ use crate::config::Config;
 use crate::modules::WaybarModule;
 use crate::output::WaybarOutput;
 use crate::state::SharedState;
+use crate::utils::{format_template, TokenValue};
 use anyhow::Result;
 
 pub struct GpuModule;
@@ -47,15 +48,15 @@ impl WaybarModule for GpuModule {
             _ => &config.gpu.format_amd,
         };
 
-        let text = format_str
-            .replace("{usage:>3.0}", &format!("{:>3.0}", usage))
-            .replace("{vram_used:>4.1}", &format!("{:>4.1}", vram_used))
-            .replace("{vram_total:>4.1}", &format!("{:>4.1}", vram_total))
-            .replace("{temp:>4.1}", &format!("{:>4.1}", temp))
-            .replace("{usage}", &format!("{:.0}", usage))
-            .replace("{vram_used}", &format!("{:.1}", vram_used))
-            .replace("{vram_total}", &format!("{:.1}", vram_total))
-            .replace("{temp}", &format!("{:.1}", temp));
+        let text = format_template(
+            format_str,
+            &[
+                ("usage", TokenValue::Float(usage)),
+                ("vram_used", TokenValue::Float(vram_used)),
+                ("vram_total", TokenValue::Float(vram_total)),
+                ("temp", TokenValue::Float(temp)),
+            ]
+        );
 
         let tooltip = if vendor == "Intel" {
             format!("Model: {}\nApprox Usage: {:.0}%", model, usage)

@@ -2,6 +2,7 @@ use crate::config::Config;
 use crate::modules::WaybarModule;
 use crate::output::WaybarOutput;
 use crate::state::SharedState;
+use crate::utils::{format_template, TokenValue};
 use anyhow::Result;
 use sysinfo::Disks;
 
@@ -43,11 +44,13 @@ impl WaybarModule for BtrfsModule {
             "normal"
         };
 
-        let text = config.pool.format
-            .replace("{used:>4.0}", &format!("{:>4.0}", used_gb))
-            .replace("{total:>4.0}", &format!("{:>4.0}", size_gb))
-            .replace("{used}", &format!("{:.0}", used_gb))
-            .replace("{total}", &format!("{:.0}", size_gb));
+        let text = format_template(
+            &config.pool.format,
+            &[
+                ("used", TokenValue::Float(used_gb)),
+                ("total", TokenValue::Float(size_gb)),
+            ]
+        );
 
         Ok(WaybarOutput {
             text,

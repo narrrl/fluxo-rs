@@ -2,6 +2,7 @@ use crate::config::Config;
 use crate::modules::WaybarModule;
 use crate::output::WaybarOutput;
 use crate::state::SharedState;
+use crate::utils::{format_template, TokenValue};
 use anyhow::Result;
 use sysinfo::Disks;
 
@@ -32,12 +33,14 @@ impl WaybarModule for DiskModule {
                     "normal"
                 };
 
-                let text = config.disk.format
-                    .replace("{mount}", mountpoint)
-                    .replace("{used:>5.1}", &format!("{:>5.1}", used_gb))
-                    .replace("{total:>5.1}", &format!("{:>5.1}", total_gb))
-                    .replace("{used}", &format!("{:.1}", used_gb))
-                    .replace("{total}", &format!("{:.1}", total_gb));
+                let text = format_template(
+                    &config.disk.format,
+                    &[
+                        ("mount", TokenValue::String(mountpoint)),
+                        ("used", TokenValue::Float(used_gb)),
+                        ("total", TokenValue::Float(total_gb)),
+                    ]
+                );
 
                 return Ok(WaybarOutput {
                     text,
