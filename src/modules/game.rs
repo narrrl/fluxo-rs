@@ -2,25 +2,16 @@ use crate::config::Config;
 use crate::modules::WaybarModule;
 use crate::output::WaybarOutput;
 use crate::state::SharedState;
+use crate::utils::run_command;
 use anyhow::Result;
-use std::process::Command;
 
 pub struct GameModule;
 
 impl WaybarModule for GameModule {
     fn run(&self, config: &Config, _state: &SharedState, _args: &[&str]) -> Result<WaybarOutput> {
-        let output = Command::new("hyprctl")
-            .args(["getoption", "animations:enabled", "-j"])
-            .output();
-
-        let mut is_gamemode = false;
-
-        if let Ok(out) = output {
-            let stdout = String::from_utf8_lossy(&out.stdout);
-            if stdout.contains("\"int\": 0") {
-                is_gamemode = true;
-            }
-        }
+        let is_gamemode = run_command("hyprctl", &["getoption", "animations:enabled", "-j"])
+            .map(|stdout| stdout.contains("\"int\": 0"))
+            .unwrap_or(false);
 
         if is_gamemode {
             Ok(WaybarOutput {

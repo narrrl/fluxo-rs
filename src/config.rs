@@ -95,9 +95,11 @@ pub struct GpuConfig {
 impl Default for GpuConfig {
     fn default() -> Self {
         Self {
-            format_amd: "AMD: {usage:>3.0}% {vram_used:>4.1}/{vram_total:>4.1}GB {temp:>4.1}C".to_string(),
+            format_amd: "AMD: {usage:>3.0}% {vram_used:>4.1}/{vram_total:>4.1}GB {temp:>4.1}C"
+                .to_string(),
             format_intel: "iGPU: {usage:>3.0}%".to_string(),
-            format_nvidia: "NV: {usage:>3.0}% {vram_used:>4.1}/{vram_total:>4.1}GB {temp:>4.1}C".to_string(),
+            format_nvidia: "NV: {usage:>3.0}% {vram_used:>4.1}/{vram_total:>4.1}GB {temp:>4.1}C"
+                .to_string(),
         }
     }
 }
@@ -246,7 +248,10 @@ pub fn load_config(custom_path: Option<PathBuf>) -> Config {
             }
         }
     } else {
-        debug!("No config file found at {:?}, using default settings.", config_path);
+        debug!(
+            "No config file found at {:?}, using default settings.",
+            config_path
+        );
         Config::default()
     }
 }

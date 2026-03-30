@@ -2,7 +2,7 @@ use crate::config::Config;
 use crate::modules::WaybarModule;
 use crate::output::WaybarOutput;
 use crate::state::SharedState;
-use crate::utils::{format_template, TokenValue};
+use crate::utils::{TokenValue, format_template, run_command};
 use anyhow::Result;
 use std::process::Command;
 
@@ -14,7 +14,9 @@ impl WaybarModule for BtModule {
 
         if *action == "disconnect" {
             if let Some(mac) = find_audio_device() {
-                let _ = Command::new("bluetoothctl").args(["disconnect", &mac]).output();
+                let _ = Command::new("bluetoothctl")
+                    .args(["disconnect", &mac])
+                    .output();
             }
             return Ok(WaybarOutput {
                 text: String::new(),
@@ -24,8 +26,7 @@ impl WaybarModule for BtModule {
             });
         }
 
-        if let Ok(output) = Command::new("bluetoothctl").arg("show").output() {
-            let stdout = String::from_utf8_lossy(&output.stdout);
+        if let Ok(stdout) = run_command("bluetoothctl", &["show"]) {
             if stdout.contains("Powered: no") {
                 return Ok(WaybarOutput {
                     text: config.bt.format_disabled.clone(),
@@ -37,8 +38,7 @@ impl WaybarModule for BtModule {
         }
 
         if let Some(mac) = find_audio_device() {
-            let info_output = Command::new("bluetoothctl").args(["info", &mac]).output()?;
-            let info = String::from_utf8_lossy(&info_output.stdout);
+            let info = run_command("bluetoothctl", &["info", &mac])?;
 
             let mut alias = mac.clone();
             let mut battery = None;
@@ -48,7 +48,8 @@ impl WaybarModule for BtModule {
                 if line.contains("Alias:") {
                     alias = line.split("Alias:").nth(1).unwrap_or("").trim().to_string();
                 } else if line.contains("Battery Percentage:") {
-                    if let Some(bat_str) = line.split('(').nth(1).and_then(|s| s.split(')').next()) {
+                    if let Some(bat_str) = line.split('(').nth(1).and_then(|s| s.split(')').next())
+                    {
                         battery = bat_str.parse::<u8>().ok();
                     }
                 } else if line.contains("Trusted: yes") {
@@ -61,12 +62,14 @@ impl WaybarModule for BtModule {
                 alias,
                 mac,
                 trusted,
-                battery.map(|b| format!("{}%", b)).unwrap_or_else(|| "N/A".to_string())
+                battery
+                    .map(|b| format!("{}%", b))
+                    .unwrap_or_else(|| "N/A".to_string())
             );
 
             let text = format_template(
                 &config.bt.format_connected,
-                &[("alias", TokenValue::String(&alias))]
+                &[("alias", TokenValue::String(&alias))],
             );
 
             Ok(WaybarOutput {
@@ -87,8 +90,7 @@ impl WaybarModule for BtModule {
 }
 
 fn find_audio_device() -> Option<String> {
-    if let Ok(output) = Command::new("pactl").arg("get-default-sink").output() {
-        let sink = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if let Ok(sink) = run_command("pactl", &["get-default-sink"]) {
         if sink.starts_with("bluez_output.") {
             let parts: Vec<&str> = sink.split('.').collect();
             if parts.len() >= 2 {
@@ -97,15 +99,13 @@ fn find_audio_device() -> Option<String> {
         }
     }
 
-    if let Ok(output) = Command::new("bluetoothctl").args(["devices", "Connected"]).output() {
-        let stdout = String::from_utf8_lossy(&output.stdout);
+    if let Ok(stdout) = run_command("bluetoothctl", &["devices", "Connected"]) {
         for line in stdout.lines() {
             if line.starts_with("Device ") {
                 let parts: Vec<&str> = line.split_whitespace().collect();
                 if parts.len() >= 2 {
                     let mac = parts[1];
-                    if let Ok(info) = Command::new("bluetoothctl").args(["info", mac]).output() {
-                        let info_str = String::from_utf8_lossy(&info.stdout);
+                    if let Ok(info_str) = run_command("bluetoothctl", &["info", mac]) {
                         if info_str.contains("0000110b-0000-1000-8000-00805f9b34fb") {
                             return Some(mac.to_string());
                         }

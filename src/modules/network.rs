@@ -2,7 +2,7 @@ use crate::config::Config;
 use crate::modules::WaybarModule;
 use crate::output::WaybarOutput;
 use crate::state::SharedState;
-use crate::utils::{format_template, TokenValue};
+use crate::utils::{TokenValue, format_template};
 use anyhow::Result;
 use std::fs;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -30,21 +30,20 @@ impl NetworkDaemon {
 
     pub fn poll(&mut self, state: SharedState) {
         // Cache invalidation: if the interface directory doesn't exist, clear cache
-        if let Some(ref iface) = self.cached_interface {
-            if !std::path::Path::new(&format!("/sys/class/net/{}", iface)).exists() {
-                self.cached_interface = None;
-                self.cached_ip = None;
-            }
+        if let Some(ref iface) = self.cached_interface
+            && !std::path::Path::new(&format!("/sys/class/net/{}", iface)).exists()
+        {
+            self.cached_interface = None;
+            self.cached_ip = None;
         }
 
         // Re-detect interface if needed
-        if self.cached_interface.is_none() {
-            if let Ok(iface) = get_primary_interface() {
-                if !iface.is_empty() {
-                    self.cached_interface = Some(iface.clone());
-                    self.cached_ip = get_ip_address(&iface);
-                }
-            }
+        if self.cached_interface.is_none()
+            && let Ok(iface) = get_primary_interface()
+            && !iface.is_empty()
+        {
+            self.cached_ip = get_ip_address(&iface);
+            self.cached_interface = Some(iface);
         }
 
         if let Some(ref interface) = self.cached_interface {
@@ -55,17 +54,26 @@ impl NetworkDaemon {
 
             if let Ok((rx_bytes_now, tx_bytes_now)) = get_bytes(interface) {
                 if self.last_time > 0 && time_now > self.last_time {
-                    let time_diff = time_now - self.last_time;
-                    let rx_bps = (rx_bytes_now.saturating_sub(self.last_rx_bytes)) / time_diff;
-                    let tx_bps = (tx_bytes_now.saturating_sub(self.last_tx_bytes)) / time_diff;
-
-                    let rx_mbps = (rx_bps as f64) / 1024.0 / 1024.0;
-                    let tx_mbps = (tx_bps as f64) / 1024.0 / 1024.0;
+                    let time_diff = (time_now - self.last_time) as f64;
+                    let rx_mbps = (rx_bytes_now.saturating_sub(self.last_rx_bytes)) as f64
+                        / time_diff
+                        / 1024.0
+                        / 1024.0;
+                    let tx_mbps = (tx_bytes_now.saturating_sub(self.last_tx_bytes)) as f64
+                        / time_diff
+                        / 1024.0
+                        / 1024.0;
 
                     if let Ok(mut state_lock) = state.write() {
                         state_lock.network.rx_mbps = rx_mbps;
                         state_lock.network.tx_mbps = tx_mbps;
+                        state_lock.network.interface = interface.clone();
+                        state_lock.network.ip = self.cached_ip.clone().unwrap_or_default();
                     }
+                } else if let Ok(mut state_lock) = state.write() {
+                    // First poll: no speed data yet, but update interface/ip
+                    state_lock.network.interface = interface.clone();
+                    state_lock.network.ip = self.cached_ip.clone().unwrap_or_default();
                 }
 
                 self.last_time = time_now;
@@ -75,13 +83,32 @@ impl NetworkDaemon {
                 // Read failed, might be down
                 self.cached_interface = None;
             }
+        } else if let Ok(mut state_lock) = state.write() {
+            // No interface detected
+            state_lock.network.interface.clear();
+            state_lock.network.ip.clear();
         }
     }
 }
 
 impl WaybarModule for NetworkModule {
     fn run(&self, config: &Config, state: &SharedState, _args: &[&str]) -> Result<WaybarOutput> {
-        let interface = get_primary_interface()?;
+        let (interface, ip, rx_mbps, tx_mbps) = if let Ok(s) = state.read() {
+            (
+                s.network.interface.clone(),
+                s.network.ip.clone(),
+                s.network.rx_mbps,
+                s.network.tx_mbps,
+            )
+        } else {
+            return Ok(WaybarOutput {
+                text: "No connection".to_string(),
+                tooltip: None,
+                class: None,
+                percentage: None,
+            });
+        };
+
         if interface.is_empty() {
             return Ok(WaybarOutput {
                 text: "No connection".to_string(),
@@ -91,24 +118,16 @@ impl WaybarModule for NetworkModule {
             });
         }
 
-        let ip = get_ip_address(&interface).unwrap_or_else(|| String::from("No IP"));
-        
-        let (rx_mbps, tx_mbps) = {
-            if let Ok(state_lock) = state.read() {
-                (state_lock.network.rx_mbps, state_lock.network.tx_mbps)
-            } else {
-                (0.0, 0.0)
-            }
-        };
+        let ip_display = if ip.is_empty() { "No IP" } else { &ip };
 
         let mut output_text = format_template(
             &config.network.format,
             &[
                 ("interface", TokenValue::String(&interface)),
-                ("ip", TokenValue::String(&ip)),
+                ("ip", TokenValue::String(ip_display)),
                 ("rx", TokenValue::Float(rx_mbps)),
                 ("tx", TokenValue::Float(tx_mbps)),
-            ]
+            ],
         );
 
         if interface.starts_with("tun")
@@ -116,12 +135,12 @@ impl WaybarModule for NetworkModule {
             || interface.starts_with("ppp")
             || interface.starts_with("pvpn")
         {
-            output_text = format!("  {}", output_text);
+            output_text = format!("  {}", output_text);
         }
 
         Ok(WaybarOutput {
             text: output_text,
-            tooltip: Some(format!("Interface: {}\nIP: {}", interface, ip)),
+            tooltip: Some(format!("Interface: {}\nIP: {}", interface, ip_display)),
             class: Some(interface),
             percentage: None,
         })
@@ -170,7 +189,7 @@ fn get_ip_address(interface: &str) -> Option<String> {
     let stdout = String::from_utf8_lossy(&output.stdout);
     for line in stdout.lines() {
         if line.trim().starts_with("inet ") {
-            let parts: Vec<&str> = line.trim().split_whitespace().collect();
+            let parts: Vec<&str> = line.split_whitespace().collect();
             if parts.len() > 1 {
                 let ip_cidr = parts[1];
                 let ip = ip_cidr.split('/').next().unwrap_or(ip_cidr);

@@ -2,7 +2,7 @@ use crate::config::Config;
 use crate::modules::WaybarModule;
 use crate::output::WaybarOutput;
 use crate::state::SharedState;
-use crate::utils::{format_template, TokenValue};
+use crate::utils::{TokenValue, format_template, run_command};
 use anyhow::{Result, anyhow};
 use std::process::Command;
 
@@ -16,30 +16,30 @@ impl WaybarModule for AudioModule {
         match *action {
             "cycle" => {
                 self.cycle_device(target_type)?;
-                return Ok(WaybarOutput {
+                Ok(WaybarOutput {
                     text: String::new(),
                     tooltip: None,
                     class: None,
                     percentage: None,
-                });
+                })
             }
-            "show" | _ => {
-                self.get_status(config, target_type)
-            }
+            "show" => self.get_status(config, target_type),
+            other => Err(anyhow!("Unknown audio action: '{}'", other)),
         }
     }
 }
 
 impl AudioModule {
     fn get_status(&self, config: &Config, target_type: &str) -> Result<WaybarOutput> {
-        let target = if target_type == "sink" { "@DEFAULT_AUDIO_SINK@" } else { "@DEFAULT_AUDIO_SOURCE@" };
+        let target = if target_type == "sink" {
+            "@DEFAULT_AUDIO_SINK@"
+        } else {
+            "@DEFAULT_AUDIO_SOURCE@"
+        };
 
-        let output = Command::new("wpctl")
-            .args(["get-volume", target])
-            .output()?;
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        
-        let parts: Vec<&str> = stdout.trim().split_whitespace().collect();
+        let stdout = run_command("wpctl", &["get-volume", target])?;
+
+        let parts: Vec<&str> = stdout.split_whitespace().collect();
         if parts.len() < 2 {
             return Err(anyhow!("Could not parse wpctl output: {}", stdout));
         }
@@ -58,31 +58,43 @@ impl AudioModule {
 
         let (text, class) = if muted {
             let icon = if target_type == "sink" { "" } else { "" };
-            let format_str = if target_type == "sink" { &config.audio.format_sink_muted } else { &config.audio.format_source_muted };
+            let format_str = if target_type == "sink" {
+                &config.audio.format_sink_muted
+            } else {
+                &config.audio.format_source_muted
+            };
             let t = format_template(
                 format_str,
                 &[
                     ("name", TokenValue::String(&name)),
                     ("icon", TokenValue::String(icon)),
-                ]
+                ],
             );
             (t, "muted")
         } else {
             let icon = if target_type == "sink" {
-                if display_vol <= 30 { "" }
-                else if display_vol <= 60 { "" }
-                else { "" }
+                if display_vol <= 30 {
+                    ""
+                } else if display_vol <= 60 {
+                    ""
+                } else {
+                    ""
+                }
             } else {
                 ""
             };
-            let format_str = if target_type == "sink" { &config.audio.format_sink_unmuted } else { &config.audio.format_source_unmuted };
+            let format_str = if target_type == "sink" {
+                &config.audio.format_sink_unmuted
+            } else {
+                &config.audio.format_source_unmuted
+            };
             let t = format_template(
                 format_str,
                 &[
                     ("name", TokenValue::String(&name)),
                     ("icon", TokenValue::String(icon)),
                     ("volume", TokenValue::Int(display_vol as i64)),
-                ]
+                ],
             );
             (t, "unmuted")
         };
@@ -96,19 +108,26 @@ impl AudioModule {
     }
 
     fn get_description(&self, target_type: &str) -> Result<String> {
-        let info_output = Command::new("pactl").arg("info").output()?;
-        let info_stdout = String::from_utf8_lossy(&info_output.stdout);
-        let search_key = if target_type == "sink" { "Default Sink:" } else { "Default Source:" };
-        
-        let default_dev = info_stdout.lines()
+        let info_stdout = run_command("pactl", &["info"])?;
+        let search_key = if target_type == "sink" {
+            "Default Sink:"
+        } else {
+            "Default Source:"
+        };
+
+        let default_dev = info_stdout
+            .lines()
             .find(|l| l.contains(search_key))
             .and_then(|l| l.split(':').nth(1))
             .map(|s| s.trim())
             .ok_or_else(|| anyhow!("Default {} not found", target_type))?;
 
-        let list_cmd = if target_type == "sink" { "sinks" } else { "sources" };
-        let list_output = Command::new("pactl").args(["list", list_cmd]).output()?;
-        let list_stdout = String::from_utf8_lossy(&list_output.stdout);
+        let list_cmd = if target_type == "sink" {
+            "sinks"
+        } else {
+            "sources"
+        };
+        let list_stdout = run_command("pactl", &["list", list_cmd])?;
 
         let mut current_name = String::new();
         for line in list_stdout.lines() {
@@ -124,11 +143,15 @@ impl AudioModule {
     }
 
     fn cycle_device(&self, target_type: &str) -> Result<()> {
-        let list_cmd = if target_type == "sink" { "sinks" } else { "sources" };
-        let output = Command::new("pactl").args(["list", "short", list_cmd]).output()?;
-        let stdout = String::from_utf8_lossy(&output.stdout);
+        let list_cmd = if target_type == "sink" {
+            "sinks"
+        } else {
+            "sources"
+        };
+        let stdout = run_command("pactl", &["list", "short", list_cmd])?;
 
-        let devices: Vec<String> = stdout.lines()
+        let devices: Vec<String> = stdout
+            .lines()
             .filter_map(|l| {
                 let parts: Vec<&str> = l.split_whitespace().collect();
                 if parts.len() >= 2 {
@@ -144,13 +167,19 @@ impl AudioModule {
             })
             .collect();
 
-        if devices.is_empty() { return Ok(()); }
+        if devices.is_empty() {
+            return Ok(());
+        }
 
-        let info_output = Command::new("pactl").arg("info").output()?;
-        let info_stdout = String::from_utf8_lossy(&info_output.stdout);
-        let search_key = if target_type == "sink" { "Default Sink:" } else { "Default Source:" };
-        
-        let current_dev = info_stdout.lines()
+        let info_stdout = run_command("pactl", &["info"])?;
+        let search_key = if target_type == "sink" {
+            "Default Sink:"
+        } else {
+            "Default Source:"
+        };
+
+        let current_dev = info_stdout
+            .lines()
             .find(|l| l.contains(search_key))
             .and_then(|l| l.split(':').nth(1))
             .map(|s| s.trim())
@@ -160,7 +189,11 @@ impl AudioModule {
         let next_index = (current_index + 1) % devices.len();
         let next_dev = &devices[next_index];
 
-        let set_cmd = if target_type == "sink" { "set-default-sink" } else { "set-default-source" };
+        let set_cmd = if target_type == "sink" {
+            "set-default-sink"
+        } else {
+            "set-default-source"
+        };
         Command::new("pactl").args([set_cmd, next_dev]).status()?;
 
         Ok(())

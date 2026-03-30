@@ -7,12 +7,23 @@ pub struct AppState {
     pub memory: MemoryState,
     pub sys: SysState,
     pub gpu: GpuState,
+    pub disks: Vec<DiskInfo>,
+}
+
+#[derive(Default, Clone)]
+pub struct DiskInfo {
+    pub mount_point: String,
+    pub filesystem: String,
+    pub total_bytes: u64,
+    pub available_bytes: u64,
 }
 
 #[derive(Default, Clone)]
 pub struct NetworkState {
     pub rx_mbps: f64,
     pub tx_mbps: f64,
+    pub interface: String,
+    pub ip: String,
 }
 
 #[derive(Clone)]

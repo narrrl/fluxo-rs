@@ -10,7 +10,7 @@ use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 use std::process;
 use tracing::{error, info};
-use tracing_subscriber::{fmt, prelude::*, EnvFilter};
+use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 
 #[derive(Parser)]
 #[command(name = "fluxo")]
@@ -98,27 +98,25 @@ fn main() {
                 process::exit(1);
             }
         }
-        Commands::Reload => {
-            match ipc::request_data("reload", &[]) {
-                Ok(_) => info!("Reload signal sent to daemon"),
-                Err(e) => {
-                    error!("Failed to send reload signal: {}", e);
-                    process::exit(1);
-                }
+        Commands::Reload => match ipc::request_data("reload", &[]) {
+            Ok(_) => info!("Reload signal sent to daemon"),
+            Err(e) => {
+                error!("Failed to send reload signal: {}", e);
+                process::exit(1);
             }
-        }
+        },
         Commands::Net => handle_ipc_response(ipc::request_data("net", &[])),
         Commands::Cpu => handle_ipc_response(ipc::request_data("cpu", &[])),
         Commands::Mem => handle_ipc_response(ipc::request_data("mem", &[])),
-        Commands::Disk { path } => handle_ipc_response(ipc::request_data("disk", &[path.clone()])),
-        Commands::Pool { kind } => handle_ipc_response(ipc::request_data("pool", &[kind.clone()])),
+        Commands::Disk { path } => handle_ipc_response(ipc::request_data("disk", &[path])),
+        Commands::Pool { kind } => handle_ipc_response(ipc::request_data("pool", &[kind])),
         Commands::Vol { cycle } => {
             let action = if *cycle { "cycle" } else { "show" };
-            handle_ipc_response(ipc::request_data("vol", &[action.to_string()]));
+            handle_ipc_response(ipc::request_data("vol", &[action]));
         }
         Commands::Mic { cycle } => {
             let action = if *cycle { "cycle" } else { "show" };
-            handle_ipc_response(ipc::request_data("mic", &[action.to_string()]));
+            handle_ipc_response(ipc::request_data("mic", &[action]));
         }
         Commands::Gpu => handle_ipc_response(ipc::request_data("gpu", &[])),
         Commands::Sys => handle_ipc_response(ipc::request_data("sys", &[])),
@@ -126,13 +124,19 @@ fn main() {
             if action == "menu" {
                 // Client-side execution of the menu
                 let config = config::load_config(None);
-                
-                let devices_out = std::process::Command::new("bluetoothctl")
+
+                let devices_out = match std::process::Command::new("bluetoothctl")
                     .args(["devices"])
                     .output()
-                    .expect("Failed to run bluetoothctl");
+                {
+                    Ok(out) => out,
+                    Err(e) => {
+                        error!("bluetoothctl not found or failed: {}", e);
+                        return;
+                    }
+                };
                 let stdout = String::from_utf8_lossy(&devices_out.stdout);
-                
+
                 let mut items = Vec::new();
                 for line in stdout.lines() {
                     if line.starts_with("Device ") {
@@ -144,24 +148,24 @@ fn main() {
                 }
 
                 if !items.is_empty() {
-                    if let Ok(selected) = utils::show_menu("Connect BT: ", &items, &config.general.menu_command) {
-                        if let Some(mac_start) = selected.rfind('(') {
-                            if let Some(mac_end) = selected.rfind(')') {
-                                let mac = &selected[mac_start + 1..mac_end];
-                                let _ = std::process::Command::new("bluetoothctl")
-                                    .args(["connect", mac])
-                                    .status();
-                            }
-                        }
+                    if let Ok(selected) =
+                        utils::show_menu("Connect BT: ", &items, &config.general.menu_command)
+                        && let Some(mac_start) = selected.rfind('(')
+                        && let Some(mac_end) = selected.rfind(')')
+                    {
+                        let mac = &selected[mac_start + 1..mac_end];
+                        let _ = std::process::Command::new("bluetoothctl")
+                            .args(["connect", mac])
+                            .status();
                     }
                 } else {
                     info!("No paired Bluetooth devices found.");
                 }
                 return;
             }
-            handle_ipc_response(ipc::request_data("bt", &[action.clone()]));
+            handle_ipc_response(ipc::request_data("bt", &[action]));
         }
-        Commands::Buds { action } => handle_ipc_response(ipc::request_data("buds", &[action.clone()])),
+        Commands::Buds { action } => handle_ipc_response(ipc::request_data("buds", &[action])),
         Commands::Power => handle_ipc_response(ipc::request_data("power", &[])),
         Commands::Game => handle_ipc_response(ipc::request_data("game", &[])),
     }
@@ -169,24 +173,22 @@ fn main() {
 
 fn handle_ipc_response(response: anyhow::Result<String>) {
     match response {
-        Ok(json_str) => {
-            match serde_json::from_str::<serde_json::Value>(&json_str) {
-                Ok(mut val) => {
-                    if let Some(text) = val.get_mut("text").and_then(|t| t.as_str()) {
-                        let processed_text = if text.contains('<') {
-                            text.to_string()
-                        } else {
-                            text.replace(' ', "\u{2007}")
-                        };
+        Ok(json_str) => match serde_json::from_str::<serde_json::Value>(&json_str) {
+            Ok(mut val) => {
+                if let Some(text) = val.get_mut("text").and_then(|t| t.as_str()) {
+                    let processed_text = if text.contains('<') {
+                        text.to_string()
+                    } else {
+                        text.replace(' ', "\u{2007}")
+                    };
 
-                        let fixed_text = format!("\u{200B}{}\u{200B}", processed_text);
-                        val["text"] = serde_json::Value::String(fixed_text);
-                    }
-                    println!("{}", serde_json::to_string(&val).unwrap());
+                    let fixed_text = format!("\u{200B}{}\u{200B}", processed_text);
+                    val["text"] = serde_json::Value::String(fixed_text);
                 }
-                Err(_) => println!("{}", json_str),
+                println!("{}", serde_json::to_string(&val).unwrap());
             }
-        }
+            Err(_) => println!("{}", json_str),
+        },
         Err(e) => {
             let err_out = output::WaybarOutput {
                 text: format!("\u{200B}Daemon offline ({})\u{200B}", e),

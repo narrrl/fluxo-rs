@@ -2,22 +2,26 @@ use crate::config::Config;
 use crate::modules::WaybarModule;
 use crate::output::WaybarOutput;
 use crate::state::SharedState;
-use crate::utils::{format_template, TokenValue};
+use crate::utils::{TokenValue, format_template};
 use anyhow::Result;
-use sysinfo::Disks;
 
 pub struct BtrfsModule;
 
 impl WaybarModule for BtrfsModule {
-    fn run(&self, config: &Config, _state: &SharedState, _args: &[&str]) -> Result<WaybarOutput> {
-        let disks = Disks::new_with_refreshed_list();
+    fn run(&self, config: &Config, state: &SharedState, _args: &[&str]) -> Result<WaybarOutput> {
+        let disks = if let Ok(s) = state.read() {
+            s.disks.clone()
+        } else {
+            return Err(anyhow::anyhow!("Failed to read state"));
+        };
+
         let mut total_used: f64 = 0.0;
         let mut total_size: f64 = 0.0;
 
         for disk in &disks {
-            if disk.file_system().to_string_lossy().to_lowercase().contains("btrfs") {
-                let size = disk.total_space() as f64;
-                let available = disk.available_space() as f64;
+            if disk.filesystem.contains("btrfs") {
+                let size = disk.total_bytes as f64;
+                let available = disk.available_bytes as f64;
                 total_size += size;
                 total_used += size - available;
             }
@@ -49,7 +53,7 @@ impl WaybarModule for BtrfsModule {
             &[
                 ("used", TokenValue::Float(used_gb)),
                 ("total", TokenValue::Float(size_gb)),
-            ]
+            ],
         );
 
         Ok(WaybarOutput {

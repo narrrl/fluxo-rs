@@ -2,7 +2,7 @@ use crate::config::Config;
 use crate::modules::WaybarModule;
 use crate::output::WaybarOutput;
 use crate::state::SharedState;
-use crate::utils::{format_template, TokenValue};
+use crate::utils::{TokenValue, format_template};
 use anyhow::Result;
 
 pub struct GpuModule;
@@ -21,7 +21,15 @@ impl WaybarModule for GpuModule {
                     state_lock.gpu.model.clone(),
                 )
             } else {
-                (false, String::from("Unknown"), 0.0, 0.0, 0.0, 0.0, String::from("Unknown"))
+                (
+                    false,
+                    String::from("Unknown"),
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    String::from("Unknown"),
+                )
             }
         };
 
@@ -55,13 +63,16 @@ impl WaybarModule for GpuModule {
                 ("vram_used", TokenValue::Float(vram_used)),
                 ("vram_total", TokenValue::Float(vram_total)),
                 ("temp", TokenValue::Float(temp)),
-            ]
+            ],
         );
 
         let tooltip = if vendor == "Intel" {
             format!("Model: {}\nApprox Usage: {:.0}%", model, usage)
         } else {
-            format!("Model: {}\nUsage: {:.0}%\nVRAM: {:.1}/{:.1}GB\nTemp: {:.1}°C", model, usage, vram_used, vram_total, temp)
+            format!(
+                "Model: {}\nUsage: {:.0}%\nVRAM: {:.1}/{:.1}GB\nTemp: {:.1}°C",
+                model, usage, vram_used, vram_total, temp
+            )
         };
 
         Ok(WaybarOutput {

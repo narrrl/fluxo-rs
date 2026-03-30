@@ -2,7 +2,7 @@ use crate::config::Config;
 use crate::modules::WaybarModule;
 use crate::output::WaybarOutput;
 use crate::state::SharedState;
-use crate::utils::{format_template, TokenValue};
+use crate::utils::{TokenValue, format_template};
 use anyhow::Result;
 use std::fs;
 
@@ -32,11 +32,11 @@ impl WaybarModule for PowerModule {
                 let name = entry.file_name().to_string_lossy().to_string();
                 if name.starts_with("AC") || name.starts_with("ADP") {
                     let online_path = entry.path().join("online");
-                    if let Ok(online_str) = fs::read_to_string(online_path) {
-                        if online_str.trim() == "1" {
-                            ac_online = true;
-                            break;
-                        }
+                    if let Ok(online_str) = fs::read_to_string(online_path)
+                        && online_str.trim() == "1"
+                    {
+                        ac_online = true;
+                        break;
                     }
                 }
             }
@@ -60,9 +60,11 @@ impl WaybarModule for PowerModule {
             }
         };
 
-        let capacity_str = fs::read_to_string(bat_path.join("capacity")).unwrap_or_else(|_| "0".to_string());
+        let capacity_str =
+            fs::read_to_string(bat_path.join("capacity")).unwrap_or_else(|_| "0".to_string());
         let percentage: u8 = capacity_str.trim().parse().unwrap_or(0);
-        let status_str = fs::read_to_string(bat_path.join("status")).unwrap_or_else(|_| "Unknown".to_string());
+        let status_str =
+            fs::read_to_string(bat_path.join("status")).unwrap_or_else(|_| "Unknown".to_string());
         let state = status_str.trim().to_lowercase();
 
         let (icon, class, tooltip) = if state == "charging" || ac_online {
@@ -95,7 +97,7 @@ impl WaybarModule for PowerModule {
             &[
                 ("percentage", TokenValue::Int(percentage as i64)),
                 ("icon", TokenValue::String(icon)),
-            ]
+            ],
         );
 
         Ok(WaybarOutput {

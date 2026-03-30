@@ -2,7 +2,7 @@ use crate::config::Config;
 use crate::modules::WaybarModule;
 use crate::output::WaybarOutput;
 use crate::state::SharedState;
-use crate::utils::{format_template, TokenValue};
+use crate::utils::{TokenValue, format_template};
 use anyhow::Result;
 
 pub struct MemoryModule;
@@ -11,23 +11,24 @@ impl WaybarModule for MemoryModule {
     fn run(&self, config: &Config, state: &SharedState, _args: &[&str]) -> Result<WaybarOutput> {
         let (used_gb, total_gb) = {
             if let Ok(state_lock) = state.read() {
-                (
-                    state_lock.memory.used_gb,
-                    state_lock.memory.total_gb,
-                )
+                (state_lock.memory.used_gb, state_lock.memory.total_gb)
             } else {
                 (0.0, 0.0)
             }
         };
 
-        let ratio = if total_gb > 0.0 { (used_gb / total_gb) * 100.0 } else { 0.0 };
+        let ratio = if total_gb > 0.0 {
+            (used_gb / total_gb) * 100.0
+        } else {
+            0.0
+        };
 
         let text = format_template(
             &config.memory.format,
             &[
                 ("used", TokenValue::Float(used_gb)),
                 ("total", TokenValue::Float(total_gb)),
-            ]
+            ],
         );
 
         let class = if ratio > 95.0 {

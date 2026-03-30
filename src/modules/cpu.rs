@@ -2,7 +2,7 @@ use crate::config::Config;
 use crate::modules::WaybarModule;
 use crate::output::WaybarOutput;
 use crate::state::SharedState;
-use crate::utils::{format_template, TokenValue};
+use crate::utils::{TokenValue, format_template};
 use anyhow::Result;
 
 pub struct CpuModule;
@@ -26,9 +26,9 @@ impl WaybarModule for CpuModule {
             &[
                 ("usage", TokenValue::Float(usage)),
                 ("temp", TokenValue::Float(temp)),
-            ]
+            ],
         );
-        
+
         let class = if usage > 95.0 {
             "max"
         } else if usage > 75.0 {

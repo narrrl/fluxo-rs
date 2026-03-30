@@ -2,7 +2,7 @@ use crate::config::Config;
 use crate::modules::WaybarModule;
 use crate::output::WaybarOutput;
 use crate::state::SharedState;
-use crate::utils::{format_template, TokenValue};
+use crate::utils::{TokenValue, format_template};
 use anyhow::Result;
 
 pub struct SysModule;
@@ -38,7 +38,7 @@ impl WaybarModule for SysModule {
                 ("load1", TokenValue::Float(load1)),
                 ("load5", TokenValue::Float(load5)),
                 ("load15", TokenValue::Float(load15)),
-            ]
+            ],
         );
 
         Ok(WaybarOutput {

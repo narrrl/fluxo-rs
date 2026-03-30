@@ -1,6 +1,21 @@
 use anyhow::{Context, Result};
 use std::io::Write;
 use std::process::{Command, Stdio};
+use tracing::warn;
+
+/// Run an external command and return its stdout as a trimmed String.
+/// Provides clear error messages when the command is not found or fails.
+pub fn run_command(cmd: &str, args: &[&str]) -> Result<String> {
+    let output = Command::new(cmd)
+        .args(args)
+        .output()
+        .with_context(|| format!("'{}' not found or failed to execute. Is it installed?", cmd))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("'{}' exited with {}: {}", cmd, output.status, stderr.trim());
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
 
 pub fn show_menu(prompt: &str, items: &[String], menu_cmd: &str) -> Result<String> {
     let cmd_str = menu_cmd.replace("{prompt}", prompt);
@@ -14,11 +29,13 @@ pub fn show_menu(prompt: &str, items: &[String], menu_cmd: &str) -> Result<Strin
 
     if let Some(mut stdin) = child.stdin.take() {
         let input = items.join("\n");
-        stdin.write_all(input.as_bytes()).context("Failed to write to menu stdin")?;
+        stdin
+            .write_all(input.as_bytes())
+            .context("Failed to write to menu stdin")?;
     }
 
     let output = child.wait_with_output().context("Failed to wait on menu")?;
-    
+
     if !output.status.success() {
         return Err(anyhow::anyhow!("Menu cancelled or failed"));
     }
@@ -49,8 +66,13 @@ pub fn format_template(template: &str, values: &[(&str, TokenValue)]) -> String 
         let name = &caps[1];
         if let Some((_, val)) = values.iter().find(|(k, _)| *k == name) {
             let align = caps.get(2).map(|m| m.as_str()).unwrap_or(">");
-            let width = caps.get(3).map(|m| m.as_str().parse::<usize>().unwrap_or(0)).unwrap_or(0);
-            let precision = caps.get(4).map(|m| m.as_str().parse::<usize>().unwrap_or(0));
+            let width = caps
+                .get(3)
+                .map(|m| m.as_str().parse::<usize>().unwrap_or(0))
+                .unwrap_or(0);
+            let precision = caps
+                .get(4)
+                .map(|m| m.as_str().parse::<usize>().unwrap_or(0));
 
             match val {
                 TokenValue::Float(f) => format_float(*f, align, width, precision),
@@ -60,35 +82,36 @@ pub fn format_template(template: &str, values: &[(&str, TokenValue)]) -> String 
         } else {
             caps[0].to_string()
         }
-    }).into_owned()
+    })
+    .into_owned()
 }
 
 fn format_float(f: f64, align: &str, width: usize, precision: Option<usize>) -> String {
     match (align, precision) {
-        ("<", Some(p)) => format!("{:<width$.p$}", f, width=width, p=p),
-        ("^", Some(p)) => format!("{:^width$.p$}", f, width=width, p=p),
-        (">", Some(p)) => format!("{:>width$.p$}", f, width=width, p=p),
-        ("<", None) => format!("{:<width$}", f, width=width),
-        ("^", None) => format!("{:^width$}", f, width=width),
-        (">", None) => format!("{:>width$}", f, width=width),
+        ("<", Some(p)) => format!("{:<width$.p$}", f, width = width, p = p),
+        ("^", Some(p)) => format!("{:^width$.p$}", f, width = width, p = p),
+        (">", Some(p)) => format!("{:>width$.p$}", f, width = width, p = p),
+        ("<", None) => format!("{:<width$}", f, width = width),
+        ("^", None) => format!("{:^width$}", f, width = width),
+        (">", None) => format!("{:>width$}", f, width = width),
         _ => format!("{}", f),
     }
 }
 
 fn format_int(i: i64, align: &str, width: usize) -> String {
     match align {
-        "<" => format!("{:<width$}", i, width=width),
-        "^" => format!("{:^width$}", i, width=width),
-        ">" => format!("{:>width$}", i, width=width),
+        "<" => format!("{:<width$}", i, width = width),
+        "^" => format!("{:^width$}", i, width = width),
+        ">" => format!("{:>width$}", i, width = width),
         _ => format!("{}", i),
     }
 }
 
 fn format_str(s: &str, align: &str, width: usize) -> String {
     match align {
-        "<" => format!("{:<width$}", s, width=width),
-        "^" => format!("{:^width$}", s, width=width),
-        ">" => format!("{:>width$}", s, width=width),
-        _ => format!("{}", s),
+        "<" => format!("{:<width$}", s, width = width),
+        "^" => format!("{:^width$}", s, width = width),
+        ">" => format!("{:>width$}", s, width = width),
+        _ => s.to_string(),
     }
 }

@@ -2,7 +2,7 @@ use crate::config::Config;
 use crate::modules::WaybarModule;
 use crate::output::WaybarOutput;
 use crate::state::SharedState;
-use crate::utils::{format_template, TokenValue};
+use crate::utils::{TokenValue, format_template};
 use anyhow::Result;
 use std::process::Command;
 
@@ -17,39 +17,54 @@ impl WaybarModule for BudsModule {
             "cycle_anc" => {
                 let output = Command::new("pbpctrl").args(["get", "anc"]).output()?;
                 let current_mode = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                
+
                 let next_mode = match current_mode.as_str() {
                     "active" => "aware",
                     "aware" => "off",
                     _ => "active",
                 };
-                
-                Command::new("pbpctrl").args(["set", "anc", next_mode]).status()?;
+
+                Command::new("pbpctrl")
+                    .args(["set", "anc", next_mode])
+                    .status()?;
                 return Ok(WaybarOutput {
                     text: String::new(),
-                    tooltip: None, class: None, percentage: None,
+                    tooltip: None,
+                    class: None,
+                    percentage: None,
                 });
             }
             "connect" => {
-                Command::new("bluetoothctl").args(["connect", mac]).status()?;
+                Command::new("bluetoothctl")
+                    .args(["connect", mac])
+                    .status()?;
                 return Ok(WaybarOutput {
                     text: String::new(),
-                    tooltip: None, class: None, percentage: None,
+                    tooltip: None,
+                    class: None,
+                    percentage: None,
                 });
             }
             "disconnect" => {
-                Command::new("bluetoothctl").args(["disconnect", mac]).status()?;
+                Command::new("bluetoothctl")
+                    .args(["disconnect", mac])
+                    .status()?;
                 return Ok(WaybarOutput {
                     text: String::new(),
-                    tooltip: None, class: None, percentage: None,
+                    tooltip: None,
+                    class: None,
+                    percentage: None,
                 });
             }
-            "show" | _ => {}
+            "show" => {}
+            other => {
+                return Err(anyhow::anyhow!("Unknown buds action: '{}'", other));
+            }
         }
 
         let bt_info = Command::new("bluetoothctl").args(["info", mac]).output()?;
         let bt_str = String::from_utf8_lossy(&bt_info.stdout);
-        
+
         if !bt_str.contains("Connected: yes") {
             return Ok(WaybarOutput {
                 text: config.buds.format_disconnected.clone(),
@@ -68,7 +83,7 @@ impl WaybarModule for BudsModule {
                 percentage: None,
             });
         }
-        
+
         let bat_result = bat_cmd.unwrap();
         let bat_output = String::from_utf8_lossy(&bat_result.stdout);
         let mut left_bud = "unknown";
@@ -85,12 +100,22 @@ impl WaybarModule for BudsModule {
         if left_bud == "unknown" && right_bud == "unknown" {
             return Ok(WaybarOutput {
                 text: "{}".to_string(),
-                tooltip: None, class: None, percentage: None,
+                tooltip: None,
+                class: None,
+                percentage: None,
             });
         }
 
-        let left_display = if left_bud == "unknown" { "---".to_string() } else { format!("{}%", left_bud) };
-        let right_display = if right_bud == "unknown" { "---".to_string() } else { format!("{}%", right_bud) };
+        let left_display = if left_bud == "unknown" {
+            "---".to_string()
+        } else {
+            format!("{}%", left_bud)
+        };
+        let right_display = if right_bud == "unknown" {
+            "---".to_string()
+        } else {
+            format!("{}%", right_bud)
+        };
 
         let anc_cmd = Command::new("pbpctrl").args(["get", "anc"]).output()?;
         let current_mode = String::from_utf8_lossy(&anc_cmd.stdout).trim().to_string();
@@ -108,7 +133,7 @@ impl WaybarModule for BudsModule {
                 ("left", TokenValue::String(&left_display)),
                 ("right", TokenValue::String(&right_display)),
                 ("anc", TokenValue::String(anc_icon)),
-            ]
+            ],
         );
 
         Ok(WaybarOutput {
