@@ -26,8 +26,8 @@ impl WaybarModule for BtModule {
             });
         }
 
-        if let Ok(stdout) = run_command("bluetoothctl", &["show"]) {
-            if stdout.contains("Powered: no") {
+        if let Ok(stdout) = run_command("bluetoothctl", &["show"])
+            && stdout.contains("Powered: no") {
                 return Ok(WaybarOutput {
                     text: config.bt.format_disabled.clone(),
                     tooltip: Some("Bluetooth Disabled".to_string()),
@@ -35,7 +35,6 @@ impl WaybarModule for BtModule {
                     percentage: None,
                 });
             }
-        }
 
         if let Some(mac) = find_audio_device() {
             let info = run_command("bluetoothctl", &["info", &mac])?;
@@ -90,14 +89,13 @@ impl WaybarModule for BtModule {
 }
 
 fn find_audio_device() -> Option<String> {
-    if let Ok(sink) = run_command("pactl", &["get-default-sink"]) {
-        if sink.starts_with("bluez_output.") {
+    if let Ok(sink) = run_command("pactl", &["get-default-sink"])
+        && sink.starts_with("bluez_output.") {
             let parts: Vec<&str> = sink.split('.').collect();
             if parts.len() >= 2 {
                 return Some(parts[1].replace('_', ":"));
             }
         }
-    }
 
     if let Ok(stdout) = run_command("bluetoothctl", &["devices", "Connected"]) {
         for line in stdout.lines() {
@@ -105,11 +103,10 @@ fn find_audio_device() -> Option<String> {
                 let parts: Vec<&str> = line.split_whitespace().collect();
                 if parts.len() >= 2 {
                     let mac = parts[1];
-                    if let Ok(info_str) = run_command("bluetoothctl", &["info", mac]) {
-                        if info_str.contains("0000110b-0000-1000-8000-00805f9b34fb") {
+                    if let Ok(info_str) = run_command("bluetoothctl", &["info", mac])
+                        && info_str.contains("0000110b-0000-1000-8000-00805f9b34fb") {
                             return Some(mac.to_string());
                         }
-                    }
                 }
             }
         }

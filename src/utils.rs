@@ -1,7 +1,6 @@
 use anyhow::{Context, Result};
 use std::io::Write;
 use std::process::{Command, Stdio};
-use tracing::warn;
 
 /// Run an external command and return its stdout as a trimmed String.
 /// Provides clear error messages when the command is not found or fails.
