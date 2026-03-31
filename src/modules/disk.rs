@@ -65,3 +65,48 @@ impl WaybarModule for DiskModule {
         Err(anyhow::anyhow!("Mountpoint {} not found", mountpoint))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::{AppState, DiskInfo, mock_state};
+
+    fn state_with_disk(mount: &str, total: u64, available: u64) -> crate::state::SharedState {
+        mock_state(AppState {
+            disks: vec![DiskInfo {
+                mount_point: mount.to_string(),
+                filesystem: "ext4".to_string(),
+                total_bytes: total,
+                available_bytes: available,
+            }],
+            ..Default::default()
+        })
+    }
+
+    #[test]
+    fn test_disk_found() {
+        let gb = 1024 * 1024 * 1024;
+        let state = state_with_disk("/", 100 * gb, 60 * gb);
+        let config = Config::default();
+        let output = DiskModule.run(&config, &state, &["/"]).unwrap();
+        assert_eq!(output.class.as_deref(), Some("normal"));
+        assert_eq!(output.percentage, Some(40)); // 40% used
+    }
+
+    #[test]
+    fn test_disk_high() {
+        let gb = 1024 * 1024 * 1024;
+        let state = state_with_disk("/", 100 * gb, 15 * gb);
+        let config = Config::default();
+        let output = DiskModule.run(&config, &state, &["/"]).unwrap();
+        assert_eq!(output.class.as_deref(), Some("high")); // 85% used
+    }
+
+    #[test]
+    fn test_disk_not_found() {
+        let state = mock_state(AppState::default());
+        let config = Config::default();
+        let result = DiskModule.run(&config, &state, &["/nonexistent"]);
+        assert!(result.is_err());
+    }
+}

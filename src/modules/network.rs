@@ -2,7 +2,7 @@ use crate::config::Config;
 use crate::modules::WaybarModule;
 use crate::output::WaybarOutput;
 use crate::state::SharedState;
-use crate::utils::{TokenValue, format_template};
+use crate::utils::{TokenValue, format_template, run_command};
 use anyhow::Result;
 use std::fs;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -148,10 +148,7 @@ impl WaybarModule for NetworkModule {
 }
 
 fn get_primary_interface() -> Result<String> {
-    let output = std::process::Command::new("ip")
-        .args(["route", "list"])
-        .output()?;
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stdout = run_command("ip", &["route", "list"])?;
 
     let mut defaults = Vec::new();
     for line in stdout.lines() {
@@ -182,11 +179,7 @@ fn get_primary_interface() -> Result<String> {
 }
 
 fn get_ip_address(interface: &str) -> Option<String> {
-    let output = std::process::Command::new("ip")
-        .args(["-4", "addr", "show", interface])
-        .output()
-        .ok()?;
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stdout = run_command("ip", &["-4", "addr", "show", interface]).ok()?;
     for line in stdout.lines() {
         if line.trim().starts_with("inet ") {
             let parts: Vec<&str> = line.split_whitespace().collect();
@@ -216,4 +209,69 @@ fn get_bytes(interface: &str) -> Result<(u64, u64)> {
         .unwrap_or(0);
 
     Ok((rx, tx))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::{AppState, NetworkState, mock_state};
+
+    #[test]
+    fn test_network_no_connection() {
+        let state = mock_state(AppState::default());
+        let config = Config::default();
+        let output = NetworkModule.run(&config, &state, &[]).unwrap();
+        assert_eq!(output.text, "No connection");
+    }
+
+    #[test]
+    fn test_network_connected() {
+        let state = mock_state(AppState {
+            network: NetworkState {
+                rx_mbps: 1.5,
+                tx_mbps: 0.3,
+                interface: "eth0".to_string(),
+                ip: "192.168.1.100".to_string(),
+            },
+            ..Default::default()
+        });
+        let config = Config::default();
+        let output = NetworkModule.run(&config, &state, &[]).unwrap();
+        assert!(output.text.contains("eth0"));
+        assert!(output.text.contains("192.168.1.100"));
+        assert!(output.text.contains("1.50"));
+        assert_eq!(output.class.as_deref(), Some("eth0"));
+    }
+
+    #[test]
+    fn test_network_vpn_prefix() {
+        let state = mock_state(AppState {
+            network: NetworkState {
+                rx_mbps: 0.0,
+                tx_mbps: 0.0,
+                interface: "wg0".to_string(),
+                ip: "10.0.0.1".to_string(),
+            },
+            ..Default::default()
+        });
+        let config = Config::default();
+        let output = NetworkModule.run(&config, &state, &[]).unwrap();
+        assert!(output.text.starts_with("  "));
+    }
+
+    #[test]
+    fn test_network_no_ip() {
+        let state = mock_state(AppState {
+            network: NetworkState {
+                rx_mbps: 0.0,
+                tx_mbps: 0.0,
+                interface: "eth0".to_string(),
+                ip: String::new(),
+            },
+            ..Default::default()
+        });
+        let config = Config::default();
+        let output = NetworkModule.run(&config, &state, &[]).unwrap();
+        assert!(output.text.contains("No IP"));
+    }
 }

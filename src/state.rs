@@ -84,3 +84,8 @@ impl Default for GpuState {
 }
 
 pub type SharedState = Arc<RwLock<AppState>>;
+
+#[cfg(test)]
+pub fn mock_state(state: AppState) -> SharedState {
+    Arc::new(RwLock::new(state))
+}

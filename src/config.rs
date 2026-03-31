@@ -1,6 +1,8 @@
+use regex::Regex;
 use serde::Deserialize;
 use std::fs;
 use std::path::PathBuf;
+use std::sync::LazyLock;
 use tracing::{debug, info, warn};
 
 #[derive(Deserialize, Default)]
@@ -224,6 +226,80 @@ impl Default for GameConfig {
     }
 }
 
+static TOKEN_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\{([a-zA-Z0-9_]+)(?::([<>\^])?(\d+)?(?:\.(\d+))?)?\}").unwrap());
+
+fn extract_tokens(format_str: &str) -> Vec<String> {
+    TOKEN_RE
+        .captures_iter(format_str)
+        .map(|cap| cap[1].to_string())
+        .collect()
+}
+
+fn validate_format(label: &str, format_str: &str, known_tokens: &[&str]) {
+    for token in extract_tokens(format_str) {
+        if !known_tokens.contains(&token.as_str()) {
+            warn!(
+                "Config [{}]: unknown token '{{{}}}' in format string. Known tokens: {:?}",
+                label, token, known_tokens
+            );
+        }
+    }
+}
+
+impl Config {
+    pub fn validate(&self) {
+        validate_format(
+            "network",
+            &self.network.format,
+            &["interface", "ip", "rx", "tx"],
+        );
+        validate_format("cpu", &self.cpu.format, &["usage", "temp"]);
+        validate_format("memory", &self.memory.format, &["used", "total"]);
+        validate_format(
+            "gpu.amd",
+            &self.gpu.format_amd,
+            &["usage", "vram_used", "vram_total", "temp"],
+        );
+        validate_format("gpu.intel", &self.gpu.format_intel, &["usage", "freq"]);
+        validate_format(
+            "gpu.nvidia",
+            &self.gpu.format_nvidia,
+            &["usage", "vram_used", "vram_total", "temp"],
+        );
+        validate_format(
+            "sys",
+            &self.sys.format,
+            &["uptime", "load1", "load5", "load15", "procs"],
+        );
+        validate_format("disk", &self.disk.format, &["mount", "used", "total"]);
+        validate_format("pool", &self.pool.format, &["used", "total"]);
+        validate_format("power", &self.power.format, &["percentage", "icon"]);
+        validate_format("buds", &self.buds.format, &["left", "right", "anc"]);
+        validate_format(
+            "audio.sink_unmuted",
+            &self.audio.format_sink_unmuted,
+            &["name", "icon", "volume"],
+        );
+        validate_format(
+            "audio.sink_muted",
+            &self.audio.format_sink_muted,
+            &["name", "icon"],
+        );
+        validate_format(
+            "audio.source_unmuted",
+            &self.audio.format_source_unmuted,
+            &["name", "icon", "volume"],
+        );
+        validate_format(
+            "audio.source_muted",
+            &self.audio.format_source_muted,
+            &["name", "icon"],
+        );
+        validate_format("bt.connected", &self.bt.format_connected, &["alias"]);
+    }
+}
+
 pub fn load_config(custom_path: Option<PathBuf>) -> Config {
     let config_path = custom_path.unwrap_or_else(|| {
         let config_dir = std::env::var("XDG_CONFIG_HOME")
@@ -236,9 +312,10 @@ pub fn load_config(custom_path: Option<PathBuf>) -> Config {
     });
 
     if let Ok(content) = fs::read_to_string(&config_path) {
-        match toml::from_str(&content) {
+        match toml::from_str::<Config>(&content) {
             Ok(cfg) => {
                 info!("Successfully loaded configuration from {:?}", config_path);
+                cfg.validate();
                 cfg
             }
             Err(e) => {
@@ -253,5 +330,74 @@ pub fn load_config(custom_path: Option<PathBuf>) -> Config {
             config_path
         );
         Config::default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    #[test]
+    fn test_default_config() {
+        let config = Config::default();
+        assert_eq!(
+            config.general.menu_command,
+            "fuzzel --dmenu --prompt '{prompt}'"
+        );
+        assert!(config.cpu.format.contains("usage"));
+        assert!(config.cpu.format.contains("temp"));
+        assert!(config.memory.format.contains("used"));
+        assert!(config.memory.format.contains("total"));
+    }
+
+    #[test]
+    fn test_load_missing_config() {
+        let config = load_config(Some(PathBuf::from("/nonexistent/config.toml")));
+        // Should fallback to defaults without panicking
+        assert_eq!(
+            config.general.menu_command,
+            "fuzzel --dmenu --prompt '{prompt}'"
+        );
+    }
+
+    #[test]
+    fn test_load_valid_partial_config() {
+        let mut tmpfile = tempfile::NamedTempFile::new().unwrap();
+        // In TOML, braces have no special meaning in strings
+        writeln!(tmpfile, "[cpu]").unwrap();
+        writeln!(tmpfile, "format = \"custom: {{usage}}\"").unwrap();
+
+        let config = load_config(Some(tmpfile.path().to_path_buf()));
+        // TOML treats {{ as literal {{ (no escape), so the value is "custom: {{usage}}"
+        assert!(config.cpu.format.contains("usage"));
+        // Other sections still have defaults
+        assert!(config.memory.format.contains("used"));
+    }
+
+    #[test]
+    fn test_load_invalid_toml() {
+        let mut tmpfile = tempfile::NamedTempFile::new().unwrap();
+        write!(tmpfile, "this is not valid toml {{{{").unwrap();
+
+        let config = load_config(Some(tmpfile.path().to_path_buf()));
+        // Should fallback to defaults
+        assert_eq!(
+            config.general.menu_command,
+            "fuzzel --dmenu --prompt '{prompt}'"
+        );
+    }
+
+    #[test]
+    fn test_load_empty_config() {
+        let tmpfile = tempfile::NamedTempFile::new().unwrap();
+        // Empty file is valid TOML, all sections default
+
+        let config = load_config(Some(tmpfile.path().to_path_buf()));
+        assert_eq!(
+            config.general.menu_command,
+            "fuzzel --dmenu --prompt '{prompt}'"
+        );
+        assert!(config.cpu.format.contains("usage"));
     }
 }

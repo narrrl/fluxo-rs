@@ -114,3 +114,109 @@ fn format_str(s: &str, align: &str, width: usize) -> String {
         _ => s.to_string(),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_simple_string_token() {
+        let result = format_template("{name}", &[("name", TokenValue::String("hello"))]);
+        assert_eq!(result, "hello");
+    }
+
+    #[test]
+    fn test_simple_float_token() {
+        let result = format_template("{val}", &[("val", TokenValue::Float(3.15))]);
+        assert_eq!(result, "3.15");
+    }
+
+    #[test]
+    fn test_simple_int_token() {
+        let result = format_template("{count}", &[("count", TokenValue::Int(42))]);
+        assert_eq!(result, "42");
+    }
+
+    #[test]
+    fn test_float_right_align_with_precision() {
+        let result = format_template("{val:>8.2}", &[("val", TokenValue::Float(3.15))]);
+        assert_eq!(result, "    3.15");
+        assert_eq!(result.len(), 8);
+    }
+
+    #[test]
+    fn test_float_left_align_with_precision() {
+        let result = format_template("{val:<8.2}", &[("val", TokenValue::Float(3.15))]);
+        assert_eq!(result, "3.15    ");
+        assert_eq!(result.len(), 8);
+    }
+
+    #[test]
+    fn test_float_center_align_with_precision() {
+        let result = format_template("{val:^8.2}", &[("val", TokenValue::Float(3.15))]);
+        assert_eq!(result, "  3.15  ");
+        assert_eq!(result.len(), 8);
+    }
+
+    #[test]
+    fn test_int_right_align() {
+        let result = format_template("{val:>5}", &[("val", TokenValue::Int(42))]);
+        assert_eq!(result, "   42");
+    }
+
+    #[test]
+    fn test_string_left_align() {
+        let result = format_template("{val:<10}", &[("val", TokenValue::String("hi"))]);
+        assert_eq!(result, "hi        ");
+        assert_eq!(result.len(), 10);
+    }
+
+    #[test]
+    fn test_unknown_token_preserved() {
+        let result = format_template("{unknown}", &[("name", TokenValue::String("test"))]);
+        assert_eq!(result, "{unknown}");
+    }
+
+    #[test]
+    fn test_multiple_tokens() {
+        let result = format_template(
+            "CPU: {usage:>4.1}% {temp:>4.1}C",
+            &[
+                ("usage", TokenValue::Float(55.3)),
+                ("temp", TokenValue::Float(65.0)),
+            ],
+        );
+        assert_eq!(result, "CPU: 55.3% 65.0C");
+    }
+
+    #[test]
+    fn test_no_tokens() {
+        let result = format_template("plain text", &[]);
+        assert_eq!(result, "plain text");
+    }
+
+    #[test]
+    fn test_empty_template() {
+        let result = format_template("", &[("x", TokenValue::Int(1))]);
+        assert_eq!(result, "");
+    }
+
+    #[test]
+    fn test_mixed_token_types() {
+        let result = format_template(
+            "{name} ({ip}): {rx:>5.2} MB/s",
+            &[
+                ("name", TokenValue::String("eth0")),
+                ("ip", TokenValue::String("10.0.0.1")),
+                ("rx", TokenValue::Float(1.5)),
+            ],
+        );
+        assert_eq!(result, "eth0 (10.0.0.1):  1.50 MB/s");
+    }
+
+    #[test]
+    fn test_float_precision_zero() {
+        let result = format_template("{val:>3.0}", &[("val", TokenValue::Float(99.7))]);
+        assert_eq!(result, "100");
+    }
+}

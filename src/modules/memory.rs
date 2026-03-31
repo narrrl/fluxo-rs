@@ -47,3 +47,55 @@ impl WaybarModule for MemoryModule {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::{AppState, MemoryState, mock_state};
+
+    #[test]
+    fn test_memory_normal() {
+        let state = mock_state(AppState {
+            memory: MemoryState {
+                used_gb: 8.0,
+                total_gb: 32.0,
+            },
+            ..Default::default()
+        });
+        let config = Config::default();
+        let output = MemoryModule.run(&config, &state, &[]).unwrap();
+        assert!(output.text.contains("8.00"));
+        assert!(output.text.contains("32.00"));
+        assert_eq!(output.class.as_deref(), Some("normal"));
+        assert_eq!(output.percentage, Some(25)); // 8/32 = 25%
+    }
+
+    #[test]
+    fn test_memory_high() {
+        let state = mock_state(AppState {
+            memory: MemoryState {
+                used_gb: 26.0,
+                total_gb: 32.0,
+            },
+            ..Default::default()
+        });
+        let config = Config::default();
+        let output = MemoryModule.run(&config, &state, &[]).unwrap();
+        assert_eq!(output.class.as_deref(), Some("high")); // 81%
+    }
+
+    #[test]
+    fn test_memory_zero_total() {
+        let state = mock_state(AppState {
+            memory: MemoryState {
+                used_gb: 0.0,
+                total_gb: 0.0,
+            },
+            ..Default::default()
+        });
+        let config = Config::default();
+        let output = MemoryModule.run(&config, &state, &[]).unwrap();
+        assert_eq!(output.class.as_deref(), Some("normal"));
+        assert_eq!(output.percentage, Some(0));
+    }
+}

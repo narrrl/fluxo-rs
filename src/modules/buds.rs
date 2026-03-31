@@ -2,9 +2,8 @@ use crate::config::Config;
 use crate::modules::WaybarModule;
 use crate::output::WaybarOutput;
 use crate::state::SharedState;
-use crate::utils::{TokenValue, format_template};
+use crate::utils::{TokenValue, format_template, run_command};
 use anyhow::Result;
-use std::process::Command;
 
 pub struct BudsModule;
 
@@ -15,8 +14,7 @@ impl WaybarModule for BudsModule {
 
         match *action {
             "cycle_anc" => {
-                let output = Command::new("pbpctrl").args(["get", "anc"]).output()?;
-                let current_mode = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                let current_mode = run_command("pbpctrl", &["get", "anc"])?;
 
                 let next_mode = match current_mode.as_str() {
                     "active" => "aware",
@@ -24,9 +22,7 @@ impl WaybarModule for BudsModule {
                     _ => "active",
                 };
 
-                Command::new("pbpctrl")
-                    .args(["set", "anc", next_mode])
-                    .status()?;
+                let _ = run_command("pbpctrl", &["set", "anc", next_mode]);
                 return Ok(WaybarOutput {
                     text: String::new(),
                     tooltip: None,
@@ -35,9 +31,7 @@ impl WaybarModule for BudsModule {
                 });
             }
             "connect" => {
-                Command::new("bluetoothctl")
-                    .args(["connect", mac])
-                    .status()?;
+                let _ = run_command("bluetoothctl", &["connect", mac]);
                 return Ok(WaybarOutput {
                     text: String::new(),
                     tooltip: None,
@@ -46,9 +40,7 @@ impl WaybarModule for BudsModule {
                 });
             }
             "disconnect" => {
-                Command::new("bluetoothctl")
-                    .args(["disconnect", mac])
-                    .status()?;
+                let _ = run_command("bluetoothctl", &["disconnect", mac]);
                 return Ok(WaybarOutput {
                     text: String::new(),
                     tooltip: None,
@@ -62,8 +54,7 @@ impl WaybarModule for BudsModule {
             }
         }
 
-        let bt_info = Command::new("bluetoothctl").args(["info", mac]).output()?;
-        let bt_str = String::from_utf8_lossy(&bt_info.stdout);
+        let bt_str = run_command("bluetoothctl", &["info", mac])?;
 
         if !bt_str.contains("Connected: yes") {
             return Ok(WaybarOutput {
@@ -74,18 +65,18 @@ impl WaybarModule for BudsModule {
             });
         }
 
-        let bat_cmd = Command::new("pbpctrl").args(["show", "battery"]).output();
-        if bat_cmd.is_err() || !bat_cmd.as_ref().unwrap().status.success() {
-            return Ok(WaybarOutput {
-                text: config.buds.format_disconnected.clone(),
-                tooltip: Some("Pixel Buds Pro 2 connected (No Data)".to_string()),
-                class: Some("disconnected".to_string()),
-                percentage: None,
-            });
-        }
+        let bat_output = match run_command("pbpctrl", &["show", "battery"]) {
+            Ok(output) => output,
+            Err(_) => {
+                return Ok(WaybarOutput {
+                    text: config.buds.format_disconnected.clone(),
+                    tooltip: Some("Pixel Buds Pro 2 connected (No Data)".to_string()),
+                    class: Some("disconnected".to_string()),
+                    percentage: None,
+                });
+            }
+        };
 
-        let bat_result = bat_cmd.unwrap();
-        let bat_output = String::from_utf8_lossy(&bat_result.stdout);
         let mut left_bud = "unknown";
         let mut right_bud = "unknown";
 
@@ -117,8 +108,7 @@ impl WaybarModule for BudsModule {
             format!("{}%", right_bud)
         };
 
-        let anc_cmd = Command::new("pbpctrl").args(["get", "anc"]).output()?;
-        let current_mode = String::from_utf8_lossy(&anc_cmd.stdout).trim().to_string();
+        let current_mode = run_command("pbpctrl", &["get", "anc"]).unwrap_or_default();
 
         let (anc_icon, class) = match current_mode.as_str() {
             "active" => ("ANC", "anc-active"),

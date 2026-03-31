@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  check:
+    name: Lint and Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+          cache: false
+
+      - name: Check formatting
+        run: cargo fmt --check
+
+      - name: Clippy
+        run: cargo clippy --tests -- -D warnings
+
+      - name: Test
+        run: cargo test
+
+      - name: Build
+        run: cargo build --release
+
+  version-check:
+    name: Version Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Compare versions
+        shell: bash
+        run: |
+          NEW_VERSION=$(grep -m1 '^version =' Cargo.toml | cut -d '"' -f 2)
+
+          git fetch origin ${{ github.base_ref }}
+          OLD_VERSION=$(git show origin/${{ github.base_ref }}:Cargo.toml | grep -m1 '^version =' | cut -d '"' -f 2)
+
+          echo "Old version (main): $OLD_VERSION"
+          echo "New version (PR): $NEW_VERSION"
+
+          if [ "$NEW_VERSION" = "$OLD_VERSION" ]; then
+            echo "Error: Cargo.toml version has not been updated in this PR!"
+            exit 1
+          else
+            echo "Success: Version updated from $OLD_VERSION to $NEW_VERSION"
+          fi

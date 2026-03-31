@@ -45,3 +45,58 @@ impl WaybarModule for CpuModule {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::{AppState, CpuState, mock_state};
+
+    #[test]
+    fn test_cpu_normal() {
+        let state = mock_state(AppState {
+            cpu: CpuState {
+                usage: 25.0,
+                temp: 45.0,
+                model: "Test CPU".into(),
+            },
+            ..Default::default()
+        });
+        let config = Config::default();
+        let output = CpuModule.run(&config, &state, &[]).unwrap();
+        assert!(output.text.contains("25.0"));
+        assert!(output.text.contains("45.0"));
+        assert_eq!(output.class.as_deref(), Some("normal"));
+        assert_eq!(output.percentage, Some(25));
+        assert_eq!(output.tooltip.as_deref(), Some("Test CPU"));
+    }
+
+    #[test]
+    fn test_cpu_high() {
+        let state = mock_state(AppState {
+            cpu: CpuState {
+                usage: 80.0,
+                temp: 70.0,
+                model: "Test".into(),
+            },
+            ..Default::default()
+        });
+        let config = Config::default();
+        let output = CpuModule.run(&config, &state, &[]).unwrap();
+        assert_eq!(output.class.as_deref(), Some("high"));
+    }
+
+    #[test]
+    fn test_cpu_max() {
+        let state = mock_state(AppState {
+            cpu: CpuState {
+                usage: 99.0,
+                temp: 95.0,
+                model: "Test".into(),
+            },
+            ..Default::default()
+        });
+        let config = Config::default();
+        let output = CpuModule.run(&config, &state, &[]).unwrap();
+        assert_eq!(output.class.as_deref(), Some("max"));
+    }
+}

@@ -1,0 +1,109 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    name: Build and Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          cache: false
+
+      - name: Install packaging tools
+        run: apt-get update && apt-get install -y dpkg-dev
+
+      - name: Get Version
+        id: get_version
+        run: |
+          VERSION=$(grep -m1 '^version =' Cargo.toml | cut -d '"' -f 2)
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            echo "TAG=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+          else
+            echo "TAG=v$VERSION" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Check if Release Exists
+        id: check_release
+        shell: bash
+        run: |
+          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            "${{ github.server_url }}/api/v1/repos/${{ github.repository }}/releases/tags/${{ steps.get_version.outputs.TAG }}")
+
+          if [ "$HTTP_STATUS" = "200" ]; then
+            echo "EXISTS=true" >> $GITHUB_OUTPUT
+            echo "Release already exists for tag ${{ steps.get_version.outputs.TAG }}. Skipping."
+          else
+            echo "EXISTS=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build
+        if: steps.check_release.outputs.EXISTS == 'false'
+        run: cargo build --release
+
+      - name: Test
+        if: steps.check_release.outputs.EXISTS == 'false'
+        run: cargo test
+
+      - name: Package .deb
+        if: steps.check_release.outputs.EXISTS == 'false'
+        env:
+          VERSION: ${{ steps.get_version.outputs.VERSION }}
+          TAG: ${{ steps.get_version.outputs.TAG }}
+        run: |
+          PKG="fluxo-rs_${VERSION}_amd64"
+
+          mkdir -p "${PKG}/DEBIAN"
+          mkdir -p "${PKG}/usr/bin"
+
+          cp target/release/fluxo-rs "${PKG}/usr/bin/"
+          strip "${PKG}/usr/bin/fluxo-rs"
+
+          printf '%s\n' \
+            "Package: fluxo-rs" \
+            "Version: ${VERSION}" \
+            "Section: utils" \
+            "Priority: optional" \
+            "Architecture: amd64" \
+            "Maintainer: fluxo-rs contributors" \
+            "Description: High-performance daemon/client for Waybar custom modules" \
+            " fluxo-rs is a compiled Rust daemon that polls system metrics and" \
+            " serves formatted JSON output to Waybar custom modules over a Unix" \
+            " domain socket. Replaces shell scripts with a single binary." \
+            > "${PKG}/DEBIAN/control"
+
+          dpkg-deb --build "${PKG}"
+
+          mv "${PKG}.deb" "fluxo-rs-${TAG}-amd64.deb"
+          echo "Built: fluxo-rs-${TAG}-amd64.deb"
+
+      - name: Create Release and Upload Assets
+        if: steps.check_release.outputs.EXISTS == 'false'
+        uses: https://github.com/softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.get_version.outputs.TAG }}
+          name: Release ${{ steps.get_version.outputs.TAG }}
+          body: |
+            Automated release for version ${{ steps.get_version.outputs.VERSION }}
+            Commit: ${{ github.sha }}
+            Branch: ${{ github.ref_name }}
+          files: |
+            fluxo-rs-${{ steps.get_version.outputs.TAG }}-amd64.deb
+            target/release/fluxo-rs
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
