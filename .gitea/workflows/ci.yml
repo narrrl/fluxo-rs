@@ -19,6 +19,8 @@ jobs:
           toolchain: stable
           components: rustfmt, clippy
           cache: false
+      - name: Install packaging tools
+        run: apt-get update && apt-get install -y dpkg-dev pkg-config libdbus-1-dev protobuf-compiler libpulse-dev
 
       - name: Check formatting
         run: cargo fmt --check
