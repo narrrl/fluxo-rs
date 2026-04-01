@@ -20,7 +20,7 @@ impl HardwareDaemon {
             components,
             gpu_vendor: None,
             gpu_poll_counter: 0,
-            disk_poll_counter: 0,
+            disk_poll_counter: 9, // Start at 9 to poll on the first tick
         }
     }
 
@@ -70,6 +70,32 @@ impl HardwareDaemon {
             }
         }
 
+        // 1. Gather GPU data outside of lock
+        let mut gpu_state = crate::state::GpuState::default();
+        self.gpu_poll_counter = (self.gpu_poll_counter + 1) % 5;
+        let should_poll_gpu = self.gpu_poll_counter == 0;
+        if should_poll_gpu {
+            self.poll_gpu(&mut gpu_state);
+        }
+
+        // 2. Gather Disk data outside of lock
+        let mut disks_data = None;
+        self.disk_poll_counter = (self.disk_poll_counter + 1) % 10;
+        if self.disk_poll_counter == 0 {
+            disks_data = Some(
+                Disks::new_with_refreshed_list()
+                    .iter()
+                    .map(|d| DiskInfo {
+                        mount_point: d.mount_point().to_string_lossy().into_owned(),
+                        filesystem: d.file_system().to_string_lossy().to_lowercase(),
+                        total_bytes: d.total_space(),
+                        available_bytes: d.available_space(),
+                    })
+                    .collect::<Vec<DiskInfo>>(),
+            );
+        }
+
+        // 3. Apply everything to state in one short lock
         if let Ok(mut state_lock) = state.write() {
             state_lock.cpu.usage = cpu_usage as f64;
             state_lock.cpu.temp = cpu_temp;
@@ -84,24 +110,12 @@ impl HardwareDaemon {
             state_lock.sys.uptime = uptime;
             state_lock.sys.process_count = process_count;
 
-            // Poll GPU every 5 seconds to avoid expensive nvidia-smi calls
-            self.gpu_poll_counter = (self.gpu_poll_counter + 1) % 5;
-            if self.gpu_poll_counter == 0 {
-                self.poll_gpu(&mut state_lock.gpu);
+            if should_poll_gpu {
+                state_lock.gpu = gpu_state;
             }
 
-            // Poll disks every 10 seconds
-            self.disk_poll_counter = (self.disk_poll_counter + 1) % 10;
-            if self.disk_poll_counter == 0 {
-                state_lock.disks = Disks::new_with_refreshed_list()
-                    .iter()
-                    .map(|d| DiskInfo {
-                        mount_point: d.mount_point().to_string_lossy().into_owned(),
-                        filesystem: d.file_system().to_string_lossy().to_lowercase(),
-                        total_bytes: d.total_space(),
-                        available_bytes: d.available_space(),
-                    })
-                    .collect();
+            if let Some(d) = disks_data {
+                state_lock.disks = d;
             }
         }
     }

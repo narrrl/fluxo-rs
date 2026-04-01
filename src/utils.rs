@@ -2,20 +2,6 @@ use anyhow::{Context, Result};
 use std::io::Write;
 use std::process::{Command, Stdio};
 
-/// Run an external command and return its stdout as a trimmed String.
-/// Provides clear error messages when the command is not found or fails.
-pub fn run_command(cmd: &str, args: &[&str]) -> Result<String> {
-    let output = Command::new(cmd)
-        .args(args)
-        .output()
-        .with_context(|| format!("'{}' not found or failed to execute. Is it installed?", cmd))?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        anyhow::bail!("'{}' exited with {}: {}", cmd, output.status, stderr.trim());
-    }
-    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
-}
-
 pub fn show_menu(prompt: &str, items: &[String], menu_cmd: &str) -> Result<String> {
     let cmd_str = menu_cmd.replace("{prompt}", prompt);
     let mut child = Command::new("sh")
@@ -50,20 +36,23 @@ pub fn show_menu(prompt: &str, items: &[String], menu_cmd: &str) -> Result<Strin
 use regex::Regex;
 use std::sync::LazyLock;
 
-pub enum TokenValue<'a> {
+pub enum TokenValue {
     Float(f64),
     Int(i64),
-    String(&'a str),
+    String(String),
 }
 
-pub fn format_template(template: &str, values: &[(&str, TokenValue)]) -> String {
+pub fn format_template<K>(template: &str, values: &[(K, TokenValue)]) -> String
+where
+    K: AsRef<str>,
+{
     static RE: LazyLock<Regex> = LazyLock::new(|| {
         Regex::new(r"\{([a-zA-Z0-9_]+)(?::([<>\^])?(\d+)?(?:\.(\d+))?)?\}").unwrap()
     });
 
     RE.replace_all(template, |caps: &regex::Captures| {
         let name = &caps[1];
-        if let Some((_, val)) = values.iter().find(|(k, _)| *k == name) {
+        if let Some((_, val)) = values.iter().find(|(k, _)| k.as_ref() == name) {
             let align = caps.get(2).map(|m| m.as_str()).unwrap_or(">");
             let width = caps
                 .get(3)
@@ -121,7 +110,10 @@ mod tests {
 
     #[test]
     fn test_simple_string_token() {
-        let result = format_template("{name}", &[("name", TokenValue::String("hello"))]);
+        let result = format_template(
+            "{name}",
+            &[("name", TokenValue::String("hello".to_string()))],
+        );
         assert_eq!(result, "hello");
     }
 
@@ -166,14 +158,20 @@ mod tests {
 
     #[test]
     fn test_string_left_align() {
-        let result = format_template("{val:<10}", &[("val", TokenValue::String("hi"))]);
+        let result = format_template(
+            "{val:<10}",
+            &[("val", TokenValue::String("hi".to_string()))],
+        );
         assert_eq!(result, "hi        ");
         assert_eq!(result.len(), 10);
     }
 
     #[test]
     fn test_unknown_token_preserved() {
-        let result = format_template("{unknown}", &[("name", TokenValue::String("test"))]);
+        let result = format_template(
+            "{unknown}",
+            &[("name", TokenValue::String("test".to_string()))],
+        );
         assert_eq!(result, "{unknown}");
     }
 
@@ -206,8 +204,8 @@ mod tests {
         let result = format_template(
             "{name} ({ip}): {rx:>5.2} MB/s",
             &[
-                ("name", TokenValue::String("eth0")),
-                ("ip", TokenValue::String("10.0.0.1")),
+                ("name", TokenValue::String("eth0".to_string())),
+                ("ip", TokenValue::String("10.0.0.1".to_string())),
                 ("rx", TokenValue::Float(1.5)),
             ],
         );

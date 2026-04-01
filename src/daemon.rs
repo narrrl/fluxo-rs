@@ -1,6 +1,8 @@
 use crate::config::Config;
 use crate::ipc::socket_path;
 use crate::modules::WaybarModule;
+use crate::modules::audio::AudioDaemon;
+use crate::modules::bt::BtDaemon;
 use crate::modules::hardware::HardwareDaemon;
 use crate::modules::network::NetworkDaemon;
 use crate::state::{AppState, SharedState};
@@ -59,9 +61,15 @@ pub fn run_daemon(config_path: Option<PathBuf>) -> Result<()> {
         info!("Starting background polling thread");
         let mut network_daemon = NetworkDaemon::new();
         let mut hardware_daemon = HardwareDaemon::new();
+        let mut bt_daemon = BtDaemon::new();
+
+        let audio_daemon = AudioDaemon::new();
+        audio_daemon.start(Arc::clone(&poll_state));
+
         while poll_running.load(Ordering::SeqCst) {
             network_daemon.poll(Arc::clone(&poll_state));
             hardware_daemon.poll(Arc::clone(&poll_state));
+            bt_daemon.poll(Arc::clone(&poll_state));
             thread::sleep(Duration::from_secs(1));
         }
     });
@@ -111,7 +119,16 @@ pub fn run_daemon(config_path: Option<PathBuf>) -> Result<()> {
                         let response =
                             handle_request(module_name, &parts[1..], &state_clone, &config_clone);
                         if let Err(e) = stream.write_all(response.as_bytes()) {
-                            error!("Failed to write IPC response: {}", e);
+                            if e.kind() == std::io::ErrorKind::BrokenPipe
+                                || e.kind() == std::io::ErrorKind::ConnectionReset
+                            {
+                                debug!(
+                                    "IPC client disconnected before response could be sent: {}",
+                                    e
+                                );
+                            } else {
+                                error!("Failed to write IPC response: {}", e);
+                            }
                         }
                         let _ = stream.shutdown(Shutdown::Write);
                     }
@@ -160,7 +177,6 @@ fn handle_request(
         "gpu" => crate::modules::gpu::GpuModule.run(&config, state, args),
         "sys" => crate::modules::sys::SysModule.run(&config, state, args),
         "bt" | "bluetooth" => crate::modules::bt::BtModule.run(&config, state, args),
-        "buds" => crate::modules::buds::BudsModule.run(&config, state, args),
         "power" => crate::modules::power::PowerModule.run(&config, state, args),
         "game" => crate::modules::game::GameModule.run(&config, state, args),
         _ => {

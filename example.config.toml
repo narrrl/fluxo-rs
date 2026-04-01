@@ -1,0 +1,46 @@
+# Fluxo configuration example
+
+[general]
+menu_command = "fuzzel --dmenu --prompt '{prompt}'"
+
+[network]
+format = "{interface} ({ip}):  {rx:>5.2} MB/s   {tx:>5.2} MB/s"
+
+[cpu]
+format = "CPU: {usage:>4.1}% {temp:>4.1}C"
+
+[memory]
+format = "{used:>5.2}/{total:>5.2}GB"
+
+[gpu]
+format_amd = "AMD: {usage:>3.0}% {vram_used:>4.1}/{vram_total:>4.1}GB {temp:>4.1}C"
+format_intel = "iGPU: {usage:>3.0}%"
+format_nvidia = "NV: {usage:>3.0}% {vram_used:>4.1}/{vram_total:>4.1}GB {temp:>4.1}C"
+
+[sys]
+format = "UP: {uptime} | LOAD: {load1:>4.2} {load5:>4.2} {load15:>4.2}"
+
+[disk]
+format = "{mount} {used:>5.1}/{total:>5.1}G"
+
+[pool]
+format = "{used:>4.0}G / {total:>4.0}G"
+
+[power]
+format = "{percentage:>3}%  {icon}"
+
+[bt]
+format_connected = "{alias} 󰂰"
+format_plugin = "{alias} [{left}|{right}] {anc} 󰂰"
+format_disconnected = "󰂯"
+format_disabled = "󰂲 Off"
+
+[audio]
+format_sink_unmuted = "{name} {volume:>3}% {icon}"
+format_sink_muted = "{name} {icon}"
+format_source_unmuted = "{name} {volume:>3}% {icon}"
+format_source_muted = "{name} {icon}"
+
+[game]
+format_active = "<span size='large'>󰊖</span>"
+format_inactive = "<span size='large'></span>"

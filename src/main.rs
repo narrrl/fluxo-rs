@@ -71,11 +71,6 @@ enum Commands {
         #[arg(default_value = "show")]
         action: String,
     },
-    /// Pixel Buds Pro ANC and Battery
-    Buds {
-        #[arg(default_value = "show")]
-        action: String,
-    },
     /// System power and battery status
     Power,
     /// Hyprland gamemode status
@@ -125,6 +120,27 @@ fn main() {
                 // Client-side execution of the menu
                 let config = config::load_config(None);
 
+                let mut items = Vec::new();
+
+                // If connected, show plugin modes and disconnect
+                if let Ok(json_str) = ipc::request_data("bt", &["get_modes"]) {
+                    if let Ok(val) = serde_json::from_str::<serde_json::Value>(&json_str) {
+                        if let Some(modes_str) = val.get("text").and_then(|t| t.as_str()) {
+                            if !modes_str.is_empty() {
+                                for mode in modes_str.lines() {
+                                    items.push(format!("Mode: {}", mode));
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if !items.is_empty() {
+                    items.push("Disconnect".to_string());
+                }
+
+                items.push("--- Connect Device ---".to_string());
+
                 let devices_out = match std::process::Command::new("bluetoothctl")
                     .args(["devices"])
                     .output()
@@ -137,7 +153,6 @@ fn main() {
                 };
                 let stdout = String::from_utf8_lossy(&devices_out.stdout);
 
-                let mut items = Vec::new();
                 for line in stdout.lines() {
                     if line.starts_with("Device ") {
                         let parts: Vec<&str> = line.splitn(3, ' ').collect();
@@ -149,23 +164,31 @@ fn main() {
 
                 if !items.is_empty() {
                     if let Ok(selected) =
-                        utils::show_menu("Connect BT: ", &items, &config.general.menu_command)
-                        && let Some(mac_start) = selected.rfind('(')
-                        && let Some(mac_end) = selected.rfind(')')
+                        utils::show_menu("BT Menu: ", &items, &config.general.menu_command)
                     {
-                        let mac = &selected[mac_start + 1..mac_end];
-                        let _ = std::process::Command::new("bluetoothctl")
-                            .args(["connect", mac])
-                            .status();
+                        if selected.starts_with("Mode: ") {
+                            let mode = &selected[6..];
+                            handle_ipc_response(ipc::request_data("bt", &["set_mode", mode]));
+                        } else if selected == "Disconnect" {
+                            handle_ipc_response(ipc::request_data("bt", &["disconnect"]));
+                        } else if selected == "--- Connect Device ---" {
+                            // Do nothing
+                        } else if let Some(mac_start) = selected.rfind('(')
+                            && let Some(mac_end) = selected.rfind(')')
+                        {
+                            let mac = &selected[mac_start + 1..mac_end];
+                            let _ = std::process::Command::new("bluetoothctl")
+                                .args(["connect", mac])
+                                .status();
+                        }
                     }
                 } else {
-                    info!("No paired Bluetooth devices found.");
+                    info!("No Bluetooth options found.");
                 }
                 return;
             }
             handle_ipc_response(ipc::request_data("bt", &[action]));
         }
-        Commands::Buds { action } => handle_ipc_response(ipc::request_data("buds", &[action])),
         Commands::Power => handle_ipc_response(ipc::request_data("power", &[])),
         Commands::Game => handle_ipc_response(ipc::request_data("game", &[])),
     }

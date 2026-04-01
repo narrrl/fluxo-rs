@@ -2,8 +2,9 @@ use crate::config::Config;
 use crate::modules::WaybarModule;
 use crate::output::WaybarOutput;
 use crate::state::SharedState;
-use crate::utils::{TokenValue, format_template, run_command};
+use crate::utils::{TokenValue, format_template};
 use anyhow::Result;
+use nix::ifaddrs::getifaddrs;
 use std::fs;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -29,21 +30,18 @@ impl NetworkDaemon {
     }
 
     pub fn poll(&mut self, state: SharedState) {
-        // Cache invalidation: if the interface directory doesn't exist, clear cache
-        if let Some(ref iface) = self.cached_interface
-            && !std::path::Path::new(&format!("/sys/class/net/{}", iface)).exists()
-        {
-            self.cached_interface = None;
-            self.cached_ip = None;
-        }
-
-        // Re-detect interface if needed
-        if self.cached_interface.is_none()
-            && let Ok(iface) = get_primary_interface()
+        // Re-detect interface on every poll to catch VPNs or route changes immediately
+        if let Ok(iface) = get_primary_interface()
             && !iface.is_empty()
         {
-            self.cached_ip = get_ip_address(&iface);
-            self.cached_interface = Some(iface);
+            // If the interface changed, or we don't have an IP yet, update the IP
+            if self.cached_interface.as_ref() != Some(&iface) || self.cached_ip.is_none() {
+                self.cached_ip = get_ip_address(&iface);
+                self.cached_interface = Some(iface);
+            }
+        } else {
+            self.cached_interface = None;
+            self.cached_ip = None;
         }
 
         if let Some(ref interface) = self.cached_interface {
@@ -123,8 +121,8 @@ impl WaybarModule for NetworkModule {
         let mut output_text = format_template(
             &config.network.format,
             &[
-                ("interface", TokenValue::String(&interface)),
-                ("ip", TokenValue::String(ip_display)),
+                ("interface", TokenValue::String(interface.clone())),
+                ("ip", TokenValue::String(ip_display.to_string())),
                 ("rx", TokenValue::Float(rx_mbps)),
                 ("tx", TokenValue::Float(tx_mbps)),
             ],
@@ -134,6 +132,8 @@ impl WaybarModule for NetworkModule {
             || interface.starts_with("wg")
             || interface.starts_with("ppp")
             || interface.starts_with("pvpn")
+            || interface.starts_with("proton")
+            || interface.starts_with("ipsec")
         {
             output_text = format!("  {}", output_text);
         }
@@ -148,24 +148,18 @@ impl WaybarModule for NetworkModule {
 }
 
 fn get_primary_interface() -> Result<String> {
-    let stdout = run_command("ip", &["route", "list"])?;
+    let content = fs::read_to_string("/proc/net/route")?;
 
     let mut defaults = Vec::new();
-    for line in stdout.lines() {
-        if line.starts_with("default") {
-            let parts: Vec<&str> = line.split_whitespace().collect();
-            let mut dev = "";
-            let mut metric = 0;
-            for i in 0..parts.len() {
-                if parts[i] == "dev" && i + 1 < parts.len() {
-                    dev = parts[i + 1];
-                }
-                if parts[i] == "metric" && i + 1 < parts.len() {
-                    metric = parts[i + 1].parse::<i32>().unwrap_or(0);
-                }
-            }
-            if !dev.is_empty() {
-                defaults.push((metric, dev.to_string()));
+    for line in content.lines().skip(1) {
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.len() >= 7 {
+            let iface = parts[0];
+            let dest = parts[1];
+            let metric = parts[6].parse::<i32>().unwrap_or(0);
+
+            if dest == "00000000" {
+                defaults.push((metric, iface.to_string()));
             }
         }
     }
@@ -179,14 +173,13 @@ fn get_primary_interface() -> Result<String> {
 }
 
 fn get_ip_address(interface: &str) -> Option<String> {
-    let stdout = run_command("ip", &["-4", "addr", "show", interface]).ok()?;
-    for line in stdout.lines() {
-        if line.trim().starts_with("inet ") {
-            let parts: Vec<&str> = line.split_whitespace().collect();
-            if parts.len() > 1 {
-                let ip_cidr = parts[1];
-                let ip = ip_cidr.split('/').next().unwrap_or(ip_cidr);
-                return Some(ip.to_string());
+    let addrs = getifaddrs().ok()?;
+    for ifaddr in addrs {
+        if ifaddr.interface_name == interface {
+            if let Some(address) = ifaddr.address {
+                if let Some(sockaddr) = address.as_sockaddr_in() {
+                    return Some(sockaddr.ip().to_string());
+                }
             }
         }
     }

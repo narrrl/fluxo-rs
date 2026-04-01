@@ -96,7 +96,7 @@ impl WaybarModule for PowerModule {
             &config.power.format,
             &[
                 ("percentage", TokenValue::Int(percentage as i64)),
-                ("icon", TokenValue::String(icon)),
+                ("icon", TokenValue::String(icon.to_string())),
             ],
         );
 

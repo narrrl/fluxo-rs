@@ -32,8 +32,7 @@ This approach eliminates process spawning overhead and temporary file locking, r
 | `pool` | Aggregate storage (btrfs) | `{used}`, `{total}` |
 | `vol` | Audio output volume | `{name}`, `{volume}`, `{icon}` |
 | `mic` | Audio input volume | `{name}`, `{volume}`, `{icon}` |
-| `bt` | Bluetooth status | `{alias}` |
-| `buds` | Pixel Buds Pro control | `{left}`, `{right}`, `{anc}` |
+| `bt` | Bluetooth status & plugins | `{alias}`, `{mac}`, `{left}`, `{right}`, `{anc}` |
 | `power` | Battery and AC status | `{percentage}`, `{icon}` |
 | `game` | Hyprland gamemode status | active/inactive icon strings |
 

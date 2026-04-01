@@ -1,7 +1,6 @@
 pub mod audio;
 pub mod bt;
 pub mod btrfs;
-pub mod buds;
 pub mod cpu;
 pub mod disk;
 pub mod game;

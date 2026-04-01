@@ -2,14 +2,16 @@ use crate::config::Config;
 use crate::modules::WaybarModule;
 use crate::output::WaybarOutput;
 use crate::state::SharedState;
-use crate::utils::run_command;
-use anyhow::Result;
+use anyhow::{Result, anyhow};
+use std::env;
+use std::io::{Read, Write};
+use std::os::unix::net::UnixStream;
 
 pub struct GameModule;
 
 impl WaybarModule for GameModule {
     fn run(&self, config: &Config, _state: &SharedState, _args: &[&str]) -> Result<WaybarOutput> {
-        let is_gamemode = run_command("hyprctl", &["getoption", "animations:enabled", "-j"])
+        let is_gamemode = hyprland_ipc("j/getoption animations:enabled")
             .map(|stdout| stdout.contains("\"int\": 0"))
             .unwrap_or(false);
 
@@ -29,4 +31,18 @@ impl WaybarModule for GameModule {
             })
         }
     }
+}
+
+fn hyprland_ipc(cmd: &str) -> Result<String> {
+    let signature = env::var("HYPRLAND_INSTANCE_SIGNATURE")
+        .map_err(|_| anyhow!("HYPRLAND_INSTANCE_SIGNATURE not set"))?;
+    let path = format!("/tmp/hypr/{}/.socket.sock", signature);
+
+    let mut stream = UnixStream::connect(path)?;
+    stream.write_all(cmd.as_bytes())?;
+
+    let mut response = String::new();
+    stream.read_to_string(&mut response)?;
+
+    Ok(response)
 }

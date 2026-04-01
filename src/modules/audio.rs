@@ -2,55 +2,220 @@ use crate::config::Config;
 use crate::modules::WaybarModule;
 use crate::output::WaybarOutput;
 use crate::state::SharedState;
-use crate::utils::{TokenValue, format_template, run_command};
+use crate::utils::{TokenValue, format_template};
 use anyhow::{Result, anyhow};
+use libpulse_binding::callbacks::ListResult;
+use libpulse_binding::context::subscribe::{Facility, InterestMaskSet};
+use libpulse_binding::context::{Context, FlagSet as ContextFlag};
+use libpulse_binding::mainloop::threaded::Mainloop as ThreadedMainloop;
+use libpulse_binding::volume::Volume;
 use std::process::Command;
+use std::sync::Arc;
+use tracing::error;
+
+pub struct AudioDaemon;
+
+impl AudioDaemon {
+    pub fn new() -> Self {
+        Self
+    }
+
+    pub fn start(&self, state: SharedState) {
+        let state_arc = Arc::clone(&state);
+
+        std::thread::spawn(move || {
+            let mut mainloop =
+                ThreadedMainloop::new().expect("Failed to create pulse threaded mainloop");
+
+            let mut context =
+                Context::new(&mainloop, "fluxo-rs").expect("Failed to create pulse context");
+
+            context
+                .connect(None, ContextFlag::NOFLAGS, None)
+                .expect("Failed to connect pulse context");
+
+            mainloop.start().expect("Failed to start pulse mainloop");
+
+            mainloop.lock();
+
+            // Wait for context to be ready
+            loop {
+                match context.get_state() {
+                    libpulse_binding::context::State::Ready => break,
+                    libpulse_binding::context::State::Failed
+                    | libpulse_binding::context::State::Terminated => {
+                        error!("Pulse context failed or terminated");
+                        mainloop.unlock();
+                        return;
+                    }
+                    _ => {
+                        mainloop.unlock();
+                        std::thread::sleep(Duration::from_millis(50));
+                        mainloop.lock();
+                    }
+                }
+            }
+
+            // Initial fetch
+            let _ = fetch_audio_data_sync(&mut context, &state_arc);
+
+            // Subscribe to events
+            let interest =
+                InterestMaskSet::SINK | InterestMaskSet::SOURCE | InterestMaskSet::SERVER;
+            context.subscribe(interest, |_| {});
+
+            let (tx, rx) = std::sync::mpsc::channel();
+
+            context.set_subscribe_callback(Some(Box::new(move |facility, _operation, _index| {
+                match facility {
+                    Some(Facility::Sink) | Some(Facility::Source) | Some(Facility::Server) => {
+                        let _ = tx.send(());
+                    }
+                    _ => {}
+                }
+            })));
+
+            mainloop.unlock();
+
+            // Background polling loop driven by events or a 2s fallback timeout
+            loop {
+                let _ = rx.recv_timeout(Duration::from_secs(2));
+                {
+                    mainloop.lock();
+                    let _ = fetch_audio_data_sync(&mut context, &state_arc);
+                    mainloop.unlock();
+                }
+            }
+        });
+    }
+}
+
+use std::time::Duration;
+
+fn fetch_audio_data_sync(context: &mut Context, state: &SharedState) -> Result<()> {
+    let state_inner = Arc::clone(state);
+
+    // We fetch all sinks and sources, and also server info to know defaults.
+    // The order doesn't strictly matter as long as we update correctly.
+
+    let st_server = Arc::clone(&state_inner);
+    context.introspect().get_server_info(move |info| {
+        let mut lock = st_server.write().unwrap();
+        lock.audio.sink.name = info
+            .default_sink_name
+            .as_ref()
+            .map(|s| s.to_string())
+            .unwrap_or_default();
+        lock.audio.source.name = info
+            .default_source_name
+            .as_ref()
+            .map(|s| s.to_string())
+            .unwrap_or_default();
+    });
+
+    let st_sink = Arc::clone(&state_inner);
+    context.introspect().get_sink_info_list(move |res| {
+        if let ListResult::Item(item) = res {
+            let mut lock = st_sink.write().unwrap();
+            // If this matches our default sink name, or if we don't have details for any yet
+            let is_default = item
+                .name
+                .as_ref()
+                .map(|s| s.to_string() == lock.audio.sink.name)
+                .unwrap_or(false);
+            if is_default {
+                lock.audio.sink.description = item
+                    .description
+                    .as_ref()
+                    .map(|s| s.to_string())
+                    .unwrap_or_default();
+                lock.audio.sink.volume =
+                    ((item.volume.avg().0 as f64 / Volume::NORMAL.0 as f64) * 100.0).round() as u8;
+                lock.audio.sink.muted = item.mute;
+            }
+        }
+    });
+
+    let st_source = Arc::clone(&state_inner);
+    context.introspect().get_source_info_list(move |res| {
+        if let ListResult::Item(item) = res {
+            let mut lock = st_source.write().unwrap();
+            let is_default = item
+                .name
+                .as_ref()
+                .map(|s| s.to_string() == lock.audio.source.name)
+                .unwrap_or(false);
+            if is_default {
+                lock.audio.source.description = item
+                    .description
+                    .as_ref()
+                    .map(|s| s.to_string())
+                    .unwrap_or_default();
+                lock.audio.source.volume =
+                    ((item.volume.avg().0 as f64 / Volume::NORMAL.0 as f64) * 100.0).round() as u8;
+                lock.audio.source.muted = item.mute;
+            }
+        }
+    });
+
+    Ok(())
+}
 
 pub struct AudioModule;
 
 impl WaybarModule for AudioModule {
-    fn run(&self, config: &Config, _state: &SharedState, args: &[&str]) -> Result<WaybarOutput> {
+    fn run(&self, config: &Config, state: &SharedState, args: &[&str]) -> Result<WaybarOutput> {
         let target_type = args.first().unwrap_or(&"sink");
         let action = args.get(1).unwrap_or(&"show");
 
         match *action {
             "cycle" => {
                 self.cycle_device(target_type)?;
-                Ok(WaybarOutput {
-                    text: String::new(),
-                    tooltip: None,
-                    class: None,
-                    percentage: None,
-                })
+                Ok(WaybarOutput::default())
             }
-            "show" => self.get_status(config, target_type),
+            "show" => self.get_status(config, state, target_type),
             other => Err(anyhow!("Unknown audio action: '{}'", other)),
         }
     }
 }
 
 impl AudioModule {
-    fn get_status(&self, config: &Config, target_type: &str) -> Result<WaybarOutput> {
-        let target = if target_type == "sink" {
-            "@DEFAULT_AUDIO_SINK@"
-        } else {
-            "@DEFAULT_AUDIO_SOURCE@"
+    fn get_status(
+        &self,
+        config: &Config,
+        state: &SharedState,
+        target_type: &str,
+    ) -> Result<WaybarOutput> {
+        let audio_state = {
+            let lock = state.read().unwrap();
+            lock.audio.clone()
         };
 
-        let stdout = run_command("wpctl", &["get-volume", target])?;
+        let (name, description, volume, muted) = if target_type == "sink" {
+            (
+                audio_state.sink.name,
+                audio_state.sink.description,
+                audio_state.sink.volume,
+                audio_state.sink.muted,
+            )
+        } else {
+            (
+                audio_state.source.name,
+                audio_state.source.description,
+                audio_state.source.volume,
+                audio_state.source.muted,
+            )
+        };
 
-        let parts: Vec<&str> = stdout.split_whitespace().collect();
-        if parts.len() < 2 {
-            return Err(anyhow!("Could not parse wpctl output: {}", stdout));
+        if name.is_empty() {
+            // Fallback if daemon hasn't populated state yet
+            return Ok(WaybarOutput {
+                text: "Audio Loading...".to_string(),
+                ..Default::default()
+            });
         }
 
-        let vol_val: f64 = parts[1].parse().unwrap_or(0.0);
-        let vol = (vol_val * 100.0).round() as u8;
-        let display_vol = std::cmp::min(vol, 100);
-        let muted = stdout.contains("[MUTED]");
-
-        let description = self.get_description(target_type)?;
-        let name = if description.len() > 20 {
+        let display_name = if description.len() > 20 {
             format!("{}...", &description[..17])
         } else {
             description.clone()
@@ -66,16 +231,16 @@ impl AudioModule {
             let t = format_template(
                 format_str,
                 &[
-                    ("name", TokenValue::String(&name)),
-                    ("icon", TokenValue::String(icon)),
+                    ("name", TokenValue::String(display_name)),
+                    ("icon", TokenValue::String(icon.to_string())),
                 ],
             );
             (t, "muted")
         } else {
             let icon = if target_type == "sink" {
-                if display_vol <= 30 {
+                if volume <= 30 {
                     ""
-                } else if display_vol <= 60 {
+                } else if volume <= 60 {
                     ""
                 } else {
                     ""
@@ -91,9 +256,9 @@ impl AudioModule {
             let t = format_template(
                 format_str,
                 &[
-                    ("name", TokenValue::String(&name)),
-                    ("icon", TokenValue::String(icon)),
-                    ("volume", TokenValue::Int(display_vol as i64)),
+                    ("name", TokenValue::String(display_name)),
+                    ("icon", TokenValue::String(icon.to_string())),
+                    ("volume", TokenValue::Int(volume as i64)),
                 ],
             );
             (t, "unmuted")
@@ -103,52 +268,32 @@ impl AudioModule {
             text,
             tooltip: Some(description),
             class: Some(class.to_string()),
-            percentage: Some(display_vol),
+            percentage: Some(volume),
         })
     }
 
-    fn get_description(&self, target_type: &str) -> Result<String> {
-        let info_stdout = run_command("pactl", &["info"])?;
-        let search_key = if target_type == "sink" {
-            "Default Sink:"
-        } else {
-            "Default Source:"
-        };
-
-        let default_dev = info_stdout
-            .lines()
-            .find(|l| l.contains(search_key))
-            .and_then(|l| l.split(':').nth(1))
-            .map(|s| s.trim())
-            .ok_or_else(|| anyhow!("Default {} not found", target_type))?;
-
-        let list_cmd = if target_type == "sink" {
-            "sinks"
-        } else {
-            "sources"
-        };
-        let list_stdout = run_command("pactl", &["list", list_cmd])?;
-
-        let mut current_name = String::new();
-        for line in list_stdout.lines() {
-            if line.trim().starts_with("Name: ") {
-                current_name = line.split(':').nth(1).unwrap_or("").trim().to_string();
-            }
-            if current_name == default_dev && line.trim().starts_with("Description: ") {
-                return Ok(line.split(':').nth(1).unwrap_or("").trim().to_string());
-            }
-        }
-
-        Ok(default_dev.to_string())
-    }
-
     fn cycle_device(&self, target_type: &str) -> Result<()> {
+        // Keep using pactl for cycling for now as it's a rare action
+        // but we could also implement it natively later.
+        let set_cmd = if target_type == "sink" {
+            "set-default-sink"
+        } else {
+            "set-default-source"
+        };
+
+        // We need to find the "next" device.
+        // For simplicity, let's keep the CLI version for now or refactor later.
+        // The user asked for "step by step".
+
         let list_cmd = if target_type == "sink" {
             "sinks"
         } else {
             "sources"
         };
-        let stdout = run_command("pactl", &["list", "short", list_cmd])?;
+        let output = Command::new("pactl")
+            .args(["list", "short", list_cmd])
+            .output()?;
+        let stdout = String::from_utf8_lossy(&output.stdout);
 
         let devices: Vec<String> = stdout
             .lines()
@@ -171,13 +316,13 @@ impl AudioModule {
             return Ok(());
         }
 
-        let info_stdout = run_command("pactl", &["info"])?;
+        let info_output = Command::new("pactl").args(["info"]).output()?;
+        let info_stdout = String::from_utf8_lossy(&info_output.stdout);
         let search_key = if target_type == "sink" {
             "Default Sink:"
         } else {
             "Default Source:"
         };
-
         let current_dev = info_stdout
             .lines()
             .find(|l| l.contains(search_key))
@@ -189,13 +334,7 @@ impl AudioModule {
         let next_index = (current_index + 1) % devices.len();
         let next_dev = &devices[next_index];
 
-        let set_cmd = if target_type == "sink" {
-            "set-default-sink"
-        } else {
-            "set-default-source"
-        };
         Command::new("pactl").args([set_cmd, next_dev]).status()?;
-
         Ok(())
     }
 }

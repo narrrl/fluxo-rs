@@ -8,6 +8,40 @@ pub struct AppState {
     pub sys: SysState,
     pub gpu: GpuState,
     pub disks: Vec<DiskInfo>,
+    pub bluetooth: BtState,
+    pub audio: AudioState,
+}
+
+#[derive(Default, Clone)]
+pub struct AudioState {
+    pub sink: AudioDeviceInfo,
+    pub source: AudioSourceInfo,
+}
+
+#[derive(Default, Clone)]
+pub struct AudioDeviceInfo {
+    pub name: String,
+    pub description: String,
+    pub volume: u8,
+    pub muted: bool,
+}
+
+#[derive(Default, Clone)]
+pub struct AudioSourceInfo {
+    pub name: String,
+    pub description: String,
+    pub volume: u8,
+    pub muted: bool,
+}
+
+#[derive(Default, Clone)]
+pub struct BtState {
+    pub connected: bool,
+    pub adapter_powered: bool,
+    pub device_alias: String,
+    pub device_address: String,
+    pub battery_percentage: Option<u8>,
+    pub plugin_data: Vec<(String, String)>,
 }
 
 #[derive(Default, Clone)]

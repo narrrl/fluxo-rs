@@ -160,7 +160,6 @@ impl Default for PowerConfig {
 
 #[derive(Deserialize)]
 pub struct BudsConfig {
-    pub mac: String,
     pub format: String,
     pub format_disconnected: String,
 }
@@ -168,7 +167,6 @@ pub struct BudsConfig {
 impl Default for BudsConfig {
     fn default() -> Self {
         Self {
-            mac: "B4:23:A2:09:D3:53".to_string(),
             format: "{left} | {right} | {anc}".to_string(),
             format_disconnected: "<span size='large'></span>".to_string(),
         }
@@ -197,6 +195,7 @@ impl Default for AudioConfig {
 #[derive(Deserialize)]
 pub struct BtConfig {
     pub format_connected: String,
+    pub format_plugin: String,
     pub format_disconnected: String,
     pub format_disabled: String,
 }
@@ -205,6 +204,7 @@ impl Default for BtConfig {
     fn default() -> Self {
         Self {
             format_connected: "{alias} 󰂰".to_string(),
+            format_plugin: "{alias} [{left}|{right}] {anc} 󰂰".to_string(),
             format_disconnected: "󰂯".to_string(),
             format_disabled: "󰂲 Off".to_string(),
         }
@@ -297,6 +297,11 @@ impl Config {
             &["name", "icon"],
         );
         validate_format("bt.connected", &self.bt.format_connected, &["alias"]);
+        validate_format(
+            "bt.plugin",
+            &self.bt.format_plugin,
+            &["alias", "left", "right", "anc", "mac"],
+        );
     }
 }
 

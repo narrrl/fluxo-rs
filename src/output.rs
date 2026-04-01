@@ -11,6 +11,17 @@ pub struct WaybarOutput {
     pub percentage: Option<u8>,
 }
 
+impl Default for WaybarOutput {
+    fn default() -> Self {
+        Self {
+            text: String::new(),
+            tooltip: None,
+            class: None,
+            percentage: None,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

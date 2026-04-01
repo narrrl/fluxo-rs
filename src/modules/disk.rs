@@ -44,7 +44,7 @@ impl WaybarModule for DiskModule {
                 let text = format_template(
                     &config.disk.format,
                     &[
-                        ("mount", TokenValue::String(mountpoint)),
+                        ("mount", TokenValue::String(mountpoint.to_string())),
                         ("used", TokenValue::Float(used_gb)),
                         ("total", TokenValue::Float(total_gb)),
                     ],

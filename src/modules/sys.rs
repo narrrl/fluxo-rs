@@ -34,7 +34,7 @@ impl WaybarModule for SysModule {
         let text = format_template(
             &config.sys.format,
             &[
-                ("uptime", TokenValue::String(&uptime_str)),
+                ("uptime", TokenValue::String(uptime_str.clone())),
                 ("load1", TokenValue::Float(load1)),
                 ("load5", TokenValue::Float(load5)),
                 ("load15", TokenValue::Float(load15)),
