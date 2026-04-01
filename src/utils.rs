@@ -189,7 +189,7 @@ mod tests {
 
     #[test]
     fn test_no_tokens() {
-        let result = format_template("plain text", &[]);
+        let result = format_template::<&'static str>("plain text", &[]);
         assert_eq!(result, "plain text");
     }
 
