@@ -1,15 +1,20 @@
 use crate::config::Config;
+use crate::error::Result;
 use crate::modules::WaybarModule;
 use crate::output::WaybarOutput;
 use crate::state::SharedState;
 use crate::utils::{TokenValue, format_template};
-use anyhow::Result;
 use std::fs;
 
 pub struct PowerModule;
 
 impl WaybarModule for PowerModule {
-    fn run(&self, config: &Config, _state: &SharedState, _args: &[&str]) -> Result<WaybarOutput> {
+    async fn run(
+        &self,
+        config: &Config,
+        _state: &SharedState,
+        _args: &[&str],
+    ) -> Result<WaybarOutput> {
         let critical_threshold = 15;
         let warning_threshold = 50;
 

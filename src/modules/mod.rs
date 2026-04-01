@@ -12,10 +12,15 @@ pub mod power;
 pub mod sys;
 
 use crate::config::Config;
+use crate::error::Result as FluxoResult;
 use crate::output::WaybarOutput;
 use crate::state::SharedState;
-use anyhow::Result;
 
 pub trait WaybarModule {
-    fn run(&self, config: &Config, state: &SharedState, args: &[&str]) -> Result<WaybarOutput>;
+    fn run(
+        &self,
+        config: &Config,
+        state: &SharedState,
+        args: &[&str],
+    ) -> impl std::future::Future<Output = FluxoResult<WaybarOutput>> + Send;
 }

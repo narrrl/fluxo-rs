@@ -1,5 +1,6 @@
 mod config;
 mod daemon;
+mod error;
 mod ipc;
 mod modules;
 mod output;
@@ -88,7 +89,12 @@ fn main() {
     match &cli.command {
         Commands::Daemon { config } => {
             info!("Starting Fluxo daemon...");
-            if let Err(e) = daemon::run_daemon(config.clone()) {
+            let rt = tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+
+            if let Err(e) = rt.block_on(daemon::run_daemon(config.clone())) {
                 error!("Daemon failed: {}", e);
                 process::exit(1);
             }

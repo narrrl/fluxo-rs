@@ -1,17 +1,24 @@
 use crate::config::Config;
+use crate::error::{FluxoError, Result};
 use crate::modules::WaybarModule;
 use crate::output::WaybarOutput;
 use crate::state::SharedState;
 use crate::utils::{TokenValue, format_template};
-use anyhow::{Result, anyhow};
 use libpulse_binding::callbacks::ListResult;
 use libpulse_binding::context::subscribe::{Facility, InterestMaskSet};
 use libpulse_binding::context::{Context, FlagSet as ContextFlag};
 use libpulse_binding::mainloop::threaded::Mainloop as ThreadedMainloop;
 use libpulse_binding::volume::Volume;
 use std::process::Command;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use tracing::error;
+
+static RUNTIME: LazyLock<tokio::runtime::Runtime> = LazyLock::new(|| {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("Failed to create Audio tokio runtime")
+});
 
 pub struct AudioDaemon;
 
@@ -100,7 +107,7 @@ fn fetch_audio_data_sync(context: &mut Context, state: &SharedState) -> Result<(
 
     let st_server = Arc::clone(&state_inner);
     context.introspect().get_server_info(move |info| {
-        let mut lock = st_server.write().unwrap();
+        let mut lock = RUNTIME.block_on(st_server.write());
         lock.audio.sink.name = info
             .default_sink_name
             .as_ref()
@@ -116,7 +123,7 @@ fn fetch_audio_data_sync(context: &mut Context, state: &SharedState) -> Result<(
     let st_sink = Arc::clone(&state_inner);
     context.introspect().get_sink_info_list(move |res| {
         if let ListResult::Item(item) = res {
-            let mut lock = st_sink.write().unwrap();
+            let mut lock = RUNTIME.block_on(st_sink.write());
             // If this matches our default sink name, or if we don't have details for any yet
             let is_default = item
                 .name
@@ -139,7 +146,7 @@ fn fetch_audio_data_sync(context: &mut Context, state: &SharedState) -> Result<(
     let st_source = Arc::clone(&state_inner);
     context.introspect().get_source_info_list(move |res| {
         if let ListResult::Item(item) = res {
-            let mut lock = st_source.write().unwrap();
+            let mut lock = RUNTIME.block_on(st_source.write());
             let is_default = item
                 .name
                 .as_ref()
@@ -164,7 +171,12 @@ fn fetch_audio_data_sync(context: &mut Context, state: &SharedState) -> Result<(
 pub struct AudioModule;
 
 impl WaybarModule for AudioModule {
-    fn run(&self, config: &Config, state: &SharedState, args: &[&str]) -> Result<WaybarOutput> {
+    async fn run(
+        &self,
+        config: &Config,
+        state: &SharedState,
+        args: &[&str],
+    ) -> Result<WaybarOutput> {
         let target_type = args.first().unwrap_or(&"sink");
         let action = args.get(1).unwrap_or(&"show");
 
@@ -173,21 +185,24 @@ impl WaybarModule for AudioModule {
                 self.cycle_device(target_type)?;
                 Ok(WaybarOutput::default())
             }
-            "show" => self.get_status(config, state, target_type),
-            other => Err(anyhow!("Unknown audio action: '{}'", other)),
+            "show" => self.get_status(config, state, target_type).await,
+            other => Err(FluxoError::Module {
+                module: "audio",
+                message: format!("Unknown audio action: '{}'", other),
+            }),
         }
     }
 }
 
 impl AudioModule {
-    fn get_status(
+    async fn get_status(
         &self,
         config: &Config,
         state: &SharedState,
         target_type: &str,
     ) -> Result<WaybarOutput> {
         let audio_state = {
-            let lock = state.read().unwrap();
+            let lock = state.read().await;
             lock.audio.clone()
         };
 

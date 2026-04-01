@@ -1,8 +1,9 @@
 use crate::config::Config;
+use crate::error::Result;
 use crate::modules::WaybarModule;
 use crate::output::WaybarOutput;
 use crate::state::SharedState;
-use anyhow::{Result, anyhow};
+use anyhow::anyhow;
 use std::env;
 use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
@@ -10,7 +11,12 @@ use std::os::unix::net::UnixStream;
 pub struct GameModule;
 
 impl WaybarModule for GameModule {
-    fn run(&self, config: &Config, _state: &SharedState, _args: &[&str]) -> Result<WaybarOutput> {
+    async fn run(
+        &self,
+        config: &Config,
+        _state: &SharedState,
+        _args: &[&str],
+    ) -> Result<WaybarOutput> {
         let is_gamemode = hyprland_ipc("j/getoption animations:enabled")
             .map(|stdout| stdout.contains("\"int\": 0"))
             .unwrap_or(false);

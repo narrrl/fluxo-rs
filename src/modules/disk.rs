@@ -1,20 +1,24 @@
 use crate::config::Config;
+use crate::error::{FluxoError, Result};
 use crate::modules::WaybarModule;
 use crate::output::WaybarOutput;
 use crate::state::SharedState;
 use crate::utils::{TokenValue, format_template};
-use anyhow::Result;
 
 pub struct DiskModule;
 
 impl WaybarModule for DiskModule {
-    fn run(&self, config: &Config, state: &SharedState, args: &[&str]) -> Result<WaybarOutput> {
+    async fn run(
+        &self,
+        config: &Config,
+        state: &SharedState,
+        args: &[&str],
+    ) -> Result<WaybarOutput> {
         let mountpoint = args.first().unwrap_or(&"/");
 
-        let disks = if let Ok(s) = state.read() {
+        let disks = {
+            let s = state.read().await;
             s.disks.clone()
-        } else {
-            return Err(anyhow::anyhow!("Failed to read state"));
         };
 
         for disk in &disks {
@@ -62,7 +66,10 @@ impl WaybarModule for DiskModule {
             }
         }
 
-        Err(anyhow::anyhow!("Mountpoint {} not found", mountpoint))
+        Err(FluxoError::Module {
+            module: "disk",
+            message: format!("Mountpoint {} not found", mountpoint),
+        })
     }
 }
 
@@ -83,30 +90,30 @@ mod tests {
         })
     }
 
-    #[test]
-    fn test_disk_found() {
+    #[tokio::test]
+    async fn test_disk_found() {
         let gb = 1024 * 1024 * 1024;
         let state = state_with_disk("/", 100 * gb, 60 * gb);
         let config = Config::default();
-        let output = DiskModule.run(&config, &state, &["/"]).unwrap();
+        let output = DiskModule.run(&config, &state, &["/"]).await.unwrap();
         assert_eq!(output.class.as_deref(), Some("normal"));
         assert_eq!(output.percentage, Some(40)); // 40% used
     }
 
-    #[test]
-    fn test_disk_high() {
+    #[tokio::test]
+    async fn test_disk_high() {
         let gb = 1024 * 1024 * 1024;
         let state = state_with_disk("/", 100 * gb, 15 * gb);
         let config = Config::default();
-        let output = DiskModule.run(&config, &state, &["/"]).unwrap();
+        let output = DiskModule.run(&config, &state, &["/"]).await.unwrap();
         assert_eq!(output.class.as_deref(), Some("high")); // 85% used
     }
 
-    #[test]
-    fn test_disk_not_found() {
+    #[tokio::test]
+    async fn test_disk_not_found() {
         let state = mock_state(AppState::default());
         let config = Config::default();
-        let result = DiskModule.run(&config, &state, &["/nonexistent"]);
+        let result = DiskModule.run(&config, &state, &["/nonexistent"]).await;
         assert!(result.is_err());
     }
 }
