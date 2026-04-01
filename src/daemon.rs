@@ -55,24 +55,57 @@ pub fn run_daemon(config_path: Option<PathBuf>) -> Result<()> {
     let config_path_clone = config_path.clone();
     let config = Arc::new(RwLock::new(crate::config::load_config(config_path)));
 
+    // 1. Network Thread
     let poll_state = Arc::clone(&state);
     let poll_running = Arc::clone(&running);
     thread::spawn(move || {
-        info!("Starting background polling thread");
-        let mut network_daemon = NetworkDaemon::new();
-        let mut hardware_daemon = HardwareDaemon::new();
-        let mut bt_daemon = BtDaemon::new();
-
-        let audio_daemon = AudioDaemon::new();
-        audio_daemon.start(Arc::clone(&poll_state));
-
+        info!("Starting Network polling thread");
+        let mut daemon = NetworkDaemon::new();
         while poll_running.load(Ordering::SeqCst) {
-            network_daemon.poll(Arc::clone(&poll_state));
-            hardware_daemon.poll(Arc::clone(&poll_state));
-            bt_daemon.poll(Arc::clone(&poll_state));
+            daemon.poll(Arc::clone(&poll_state));
             thread::sleep(Duration::from_secs(1));
         }
     });
+
+    // 2. Fast Hardware Thread (CPU, Mem, Load)
+    let poll_state = Arc::clone(&state);
+    let poll_running = Arc::clone(&running);
+    thread::spawn(move || {
+        info!("Starting Fast Hardware polling thread");
+        let mut daemon = HardwareDaemon::new();
+        while poll_running.load(Ordering::SeqCst) {
+            daemon.poll_fast(Arc::clone(&poll_state));
+            thread::sleep(Duration::from_secs(1));
+        }
+    });
+
+    // 3. Slow Hardware Thread (GPU, Disks)
+    let poll_state = Arc::clone(&state);
+    let poll_running = Arc::clone(&running);
+    thread::spawn(move || {
+        info!("Starting Slow Hardware polling thread");
+        let mut daemon = HardwareDaemon::new();
+        while poll_running.load(Ordering::SeqCst) {
+            daemon.poll_slow(Arc::clone(&poll_state));
+            thread::sleep(Duration::from_secs(1));
+        }
+    });
+
+    // 4. Bluetooth Thread
+    let poll_state = Arc::clone(&state);
+    let poll_running = Arc::clone(&running);
+    thread::spawn(move || {
+        info!("Starting Bluetooth polling thread");
+        let mut daemon = BtDaemon::new();
+        while poll_running.load(Ordering::SeqCst) {
+            daemon.poll(Arc::clone(&poll_state));
+            thread::sleep(Duration::from_secs(1));
+        }
+    });
+
+    // 5. Audio Thread (Event driven)
+    let audio_daemon = AudioDaemon::new();
+    audio_daemon.start(Arc::clone(&state));
 
     info!("Fluxo daemon successfully bound to socket: {}", sock_path);
 

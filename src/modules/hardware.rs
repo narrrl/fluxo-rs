@@ -24,7 +24,7 @@ impl HardwareDaemon {
         }
     }
 
-    pub fn poll(&mut self, state: SharedState) {
+    pub fn poll_fast(&mut self, state: SharedState) {
         self.sys.refresh_cpu_usage();
         self.sys.refresh_memory();
         self.components.refresh(true);
@@ -70,6 +70,23 @@ impl HardwareDaemon {
             }
         }
 
+        if let Ok(mut state_lock) = state.write() {
+            state_lock.cpu.usage = cpu_usage as f64;
+            state_lock.cpu.temp = cpu_temp;
+            state_lock.cpu.model = cpu_model;
+
+            state_lock.memory.total_gb = total_mem;
+            state_lock.memory.used_gb = used_mem;
+
+            state_lock.sys.load_1 = load_avg.one;
+            state_lock.sys.load_5 = load_avg.five;
+            state_lock.sys.load_15 = load_avg.fifteen;
+            state_lock.sys.uptime = uptime;
+            state_lock.sys.process_count = process_count;
+        }
+    }
+
+    pub fn poll_slow(&mut self, state: SharedState) {
         // 1. Gather GPU data outside of lock
         let mut gpu_state = crate::state::GpuState::default();
         self.gpu_poll_counter = (self.gpu_poll_counter + 1) % 5;
@@ -95,21 +112,8 @@ impl HardwareDaemon {
             );
         }
 
-        // 3. Apply everything to state in one short lock
+        // 3. Apply to state
         if let Ok(mut state_lock) = state.write() {
-            state_lock.cpu.usage = cpu_usage as f64;
-            state_lock.cpu.temp = cpu_temp;
-            state_lock.cpu.model = cpu_model;
-
-            state_lock.memory.total_gb = total_mem;
-            state_lock.memory.used_gb = used_mem;
-
-            state_lock.sys.load_1 = load_avg.one;
-            state_lock.sys.load_5 = load_avg.five;
-            state_lock.sys.load_15 = load_avg.fifteen;
-            state_lock.sys.uptime = uptime;
-            state_lock.sys.process_count = process_count;
-
             if should_poll_gpu {
                 state_lock.gpu = gpu_state;
             }
