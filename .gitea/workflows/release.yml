@@ -22,7 +22,7 @@ jobs:
           cache: false
 
       - name: Install packaging tools
-        run: apt-get update && apt-get install -y dpkg-dev pkg-config libdbus-1-dev
+        run: apt-get update && apt-get install -y dpkg-dev pkg-config libdbus-1-dev protobuf-compiler
 
       - name: Get Version
         id: get_version
