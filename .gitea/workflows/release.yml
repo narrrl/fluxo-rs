@@ -22,7 +22,7 @@ jobs:
           cache: false
 
       - name: Install packaging tools
-        run: apt-get update && apt-get install -y dpkg-dev
+        run: apt-get update && apt-get install -y dpkg-dev pkg-config
 
       - name: Get Version
         id: get_version

@@ -226,12 +226,11 @@ async fn buds_task(
         if let Ok(val) = service
             .read_setting_var(settings::SettingId::CurrentAncrState)
             .await
+            && let SettingValue::CurrentAncrState(anc_state) = val
         {
-            if let SettingValue::CurrentAncrState(anc_state) = val {
-                let mut status = MAESTRO.get_status(mac);
-                status.anc_state = anc_state_to_string(&anc_state);
-                statuses.lock().unwrap().insert(mac.to_string(), status);
-            }
+            let mut status = MAESTRO.get_status(mac);
+            status.anc_state = anc_state_to_string(&anc_state);
+            statuses.lock().unwrap().insert(mac.to_string(), status);
         }
 
         // Subscribe to real-time status updates (battery, ANC, wear)

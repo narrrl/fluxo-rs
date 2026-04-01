@@ -26,8 +26,6 @@ pub struct Config {
     #[serde(default)]
     pub power: PowerConfig,
     #[serde(default)]
-    pub buds: BudsConfig,
-    #[serde(default)]
     pub audio: AudioConfig,
     #[serde(default)]
     pub bt: BtConfig,
@@ -159,21 +157,6 @@ impl Default for PowerConfig {
 }
 
 #[derive(Deserialize)]
-pub struct BudsConfig {
-    pub format: String,
-    pub format_disconnected: String,
-}
-
-impl Default for BudsConfig {
-    fn default() -> Self {
-        Self {
-            format: "{left} | {right} | {anc}".to_string(),
-            format_disconnected: "<span size='large'></span>".to_string(),
-        }
-    }
-}
-
-#[derive(Deserialize)]
 pub struct AudioConfig {
     pub format_sink_unmuted: String,
     pub format_sink_muted: String,
@@ -275,7 +258,6 @@ impl Config {
         validate_format("disk", &self.disk.format, &["mount", "used", "total"]);
         validate_format("pool", &self.pool.format, &["used", "total"]);
         validate_format("power", &self.power.format, &["percentage", "icon"]);
-        validate_format("buds", &self.buds.format, &["left", "right", "anc"]);
         validate_format(
             "audio.sink_unmuted",
             &self.audio.format_sink_unmuted,

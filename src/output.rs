@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-#[derive(Serialize)]
+#[derive(Serialize, Default)]
 pub struct WaybarOutput {
     pub text: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -9,17 +9,6 @@ pub struct WaybarOutput {
     pub class: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub percentage: Option<u8>,
-}
-
-impl Default for WaybarOutput {
-    fn default() -> Self {
-        Self {
-            text: String::new(),
-            tooltip: None,
-            class: None,
-            percentage: None,
-        }
-    }
 }
 
 #[cfg(test)]

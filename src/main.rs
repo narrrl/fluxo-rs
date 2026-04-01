@@ -123,15 +123,13 @@ fn main() {
                 let mut items = Vec::new();
 
                 // If connected, show plugin modes and disconnect
-                if let Ok(json_str) = ipc::request_data("bt", &["get_modes"]) {
-                    if let Ok(val) = serde_json::from_str::<serde_json::Value>(&json_str) {
-                        if let Some(modes_str) = val.get("text").and_then(|t| t.as_str()) {
-                            if !modes_str.is_empty() {
-                                for mode in modes_str.lines() {
-                                    items.push(format!("Mode: {}", mode));
-                                }
-                            }
-                        }
+                if let Ok(json_str) = ipc::request_data("bt", &["get_modes"])
+                    && let Ok(val) = serde_json::from_str::<serde_json::Value>(&json_str)
+                    && let Some(modes_str) = val.get("text").and_then(|t| t.as_str())
+                    && !modes_str.is_empty()
+                {
+                    for mode in modes_str.lines() {
+                        items.push(format!("Mode: {}", mode));
                     }
                 }
 
@@ -166,8 +164,7 @@ fn main() {
                     if let Ok(selected) =
                         utils::show_menu("BT Menu: ", &items, &config.general.menu_command)
                     {
-                        if selected.starts_with("Mode: ") {
-                            let mode = &selected[6..];
+                        if let Some(mode) = selected.strip_prefix("Mode: ") {
                             handle_ipc_response(ipc::request_data("bt", &["set_mode", mode]));
                         } else if selected == "Disconnect" {
                             handle_ipc_response(ipc::request_data("bt", &["disconnect"]));

@@ -121,7 +121,7 @@ fn fetch_audio_data_sync(context: &mut Context, state: &SharedState) -> Result<(
             let is_default = item
                 .name
                 .as_ref()
-                .map(|s| s.to_string() == lock.audio.sink.name)
+                .map(|s| s.as_ref() == lock.audio.sink.name)
                 .unwrap_or(false);
             if is_default {
                 lock.audio.sink.description = item
@@ -143,7 +143,7 @@ fn fetch_audio_data_sync(context: &mut Context, state: &SharedState) -> Result<(
             let is_default = item
                 .name
                 .as_ref()
-                .map(|s| s.to_string() == lock.audio.source.name)
+                .map(|s| s.as_ref() == lock.audio.source.name)
                 .unwrap_or(false);
             if is_default {
                 lock.audio.source.description = item

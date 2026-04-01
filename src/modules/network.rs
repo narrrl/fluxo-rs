@@ -175,12 +175,11 @@ fn get_primary_interface() -> Result<String> {
 fn get_ip_address(interface: &str) -> Option<String> {
     let addrs = getifaddrs().ok()?;
     for ifaddr in addrs {
-        if ifaddr.interface_name == interface {
-            if let Some(address) = ifaddr.address {
-                if let Some(sockaddr) = address.as_sockaddr_in() {
-                    return Some(sockaddr.ip().to_string());
-                }
-            }
+        if ifaddr.interface_name == interface
+            && let Some(address) = ifaddr.address
+            && let Some(sockaddr) = address.as_sockaddr_in()
+        {
+            return Some(sockaddr.ip().to_string());
         }
     }
     None
