@@ -89,11 +89,13 @@ pub async fn run_daemon(config_path: Option<PathBuf>) -> Result<()> {
 
     // 4. Bluetooth Task
     let poll_state = Arc::clone(&state);
+    let poll_config = Arc::clone(&config);
     tokio::spawn(async move {
         info!("Starting Bluetooth polling task");
         let mut daemon = BtDaemon::new();
         loop {
-            daemon.poll(Arc::clone(&poll_state)).await;
+            let config = poll_config.read().await;
+            daemon.poll(Arc::clone(&poll_state), &config).await;
             sleep(Duration::from_secs(1)).await;
         }
     });

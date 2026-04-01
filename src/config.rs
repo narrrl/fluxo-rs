@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::sync::LazyLock;
 use tracing::{debug, info, warn};
 
-#[derive(Deserialize, Default)]
+#[derive(Deserialize, Default, Clone)]
 pub struct Config {
     #[serde(default)]
     pub general: GeneralConfig,
@@ -33,7 +33,7 @@ pub struct Config {
     pub game: GameConfig,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 pub struct GeneralConfig {
     pub menu_command: String,
 }
@@ -46,7 +46,7 @@ impl Default for GeneralConfig {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 pub struct NetworkConfig {
     pub format: String,
 }
@@ -59,7 +59,7 @@ impl Default for NetworkConfig {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 pub struct CpuConfig {
     pub format: String,
 }
@@ -72,7 +72,7 @@ impl Default for CpuConfig {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 pub struct MemoryConfig {
     pub format: String,
 }
@@ -85,7 +85,7 @@ impl Default for MemoryConfig {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 pub struct GpuConfig {
     pub format_amd: String,
     pub format_intel: String,
@@ -104,7 +104,7 @@ impl Default for GpuConfig {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 pub struct SysConfig {
     pub format: String,
 }
@@ -117,7 +117,7 @@ impl Default for SysConfig {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 pub struct DiskConfig {
     pub format: String,
 }
@@ -130,7 +130,7 @@ impl Default for DiskConfig {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 pub struct PoolConfig {
     pub format: String,
 }
@@ -143,7 +143,7 @@ impl Default for PoolConfig {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 pub struct PowerConfig {
     pub format: String,
 }
@@ -156,7 +156,7 @@ impl Default for PowerConfig {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 pub struct AudioConfig {
     pub format_sink_unmuted: String,
     pub format_sink_muted: String,
@@ -175,7 +175,7 @@ impl Default for AudioConfig {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 pub struct BtConfig {
     pub format_connected: String,
     pub format_plugin: String,
@@ -194,7 +194,7 @@ impl Default for BtConfig {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 pub struct GameConfig {
     pub format_active: String,
     pub format_inactive: String,
