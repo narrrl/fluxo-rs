@@ -1,95 +1,66 @@
 # fluxo-rs
 
-fluxo-rs is a high-performance system metrics daemon and client designed specifically for waybar. It replaces standard shell scripts with a compiled rust binary that collects data via a background polling loop and serves it over a unix domain socket (`/tmp/fluxo.sock`).
+fluxo-rs is a high-performance system metrics daemon and client designed specifically for Waybar. It replaces standard shell scripts with a compiled Rust binary that collects data via a background polling loop and serves it over a Unix socket.
 
-## Description
+## Key Features
 
-The project follows a client-server architecture:
-- **Daemon**: Handles heavy lifting (polling cpu, memory, network, gpu) and stores state in memory.
-- **Client**: A thin cli wrapper that connects to the daemon's socket to retrieve formatted json for waybar.
-
-This approach eliminates process spawning overhead and temporary file locking, resulting in near-zero cpu usage for custom modules.
-
-## Features
-
-- **Ultra-lightweight**: Background polling is highly optimized (e.g., O(1) process counting).
-- **Jitter-free**: Uses zero-width sentinels and figure spaces to prevent waybar from trimming padding.
-- **Configurable**: Fully customizable output formats via toml config.
-- **Interactive Menus**: Integrated support for selecting items (like Bluetooth devices) via external menus (e.g., Rofi, Wofi, Fuzzel).
-- **Live Reload**: Configuration can be reloaded without restarting the daemon.
-- **Multi-vendor GPU**: Native support for intel (igpu), amd, and nvidia.
+- **Asynchronous Architecture**: Built on **Tokio**, the daemon handles concurrent IPC requests and background tasks with zero latency and minimal CPU overhead.
+- **Native Library Integrations**: 
+    - **Audio**: Direct `libpulse` integration for event-driven, instant volume and device updates.
+    - **Bluetooth**: Native `bluer` integration for robust device monitoring.
+    - **Pixel Buds Pro**: Custom native RPC implementation for real-time battery and ANC control.
+    - **Network**: Native `nix` and `/proc` inspection for high-speed interface monitoring.
+    - **Hyprland**: Direct IPC Unix socket communication for gamemode and animation status.
+- **Circuit Breaker (Failsafe)**: Automatically detects failing modules and enters a "Cool down" state to prevent resource waste and log spam.
+- **Multi-threaded Polling**: Decoupled subsystem threads ensure that a hang in one system (e.g., a slow GPU probe) never freezes your entire bar.
 
 ## Modules
 
 | Command | Description | Tokens |
 | :--- | :--- | :--- |
-| `net` | Network speed (rx/tx) | `{interface}`, `{ip}`, `{rx}`, `{tx}` |
-| `cpu` | CPU usage and temp | `{usage}`, `{temp}` |
+| `cpu` | CPU usage and temperature | `{usage}`, `{temp}`, `{model}` |
 | `mem` | Memory usage | `{used}`, `{total}` |
-| `gpu` | GPU utilization | `{usage}`, `{vram_used}`, `{vram_total}`, `{temp}` |
-| `sys` | System load and uptime | `{uptime}`, `{load1}`, `{load5}`, `{load15}` |
-| `disk` | Disk usage (default: /) | `{mount}`, `{used}`, `{total}` |
-| `pool` | Aggregate storage (btrfs) | `{used}`, `{total}` |
-| `vol` | Audio output volume | `{name}`, `{volume}`, `{icon}` |
-| `mic` | Audio input volume | `{name}`, `{volume}`, `{icon}` |
+| `net` | Network status & speeds | `{interface}`, `{ip}`, `{rx}`, `{tx}` |
+| `sys` | System load and uptime | `{uptime}`, `{load1}`, `{load5}`, `{load15}`, `{procs}` |
+| `disk` | Disk usage | `{mount}`, `{used}`, `{total}` |
+| `pool` | Btrfs aggregate storage | `{used}`, `{total}` |
+| `vol` | Audio output (sink) | `{name}`, `{volume}`, `{icon}` |
+| `mic` | Audio input (source) | `{name}`, `{volume}`, `{icon}` |
 | `bt` | Bluetooth status & plugins | `{alias}`, `{mac}`, `{left}`, `{right}`, `{anc}` |
 | `power` | Battery and AC status | `{percentage}`, `{icon}` |
-| `game` | Hyprland gamemode status | active/inactive icon strings |
+| `game` | Hyprland status | active/inactive icons |
 
 ## Setup
 
-1. Build the project:
-   ```bash
-   cd fluxo-rs
-   cargo build --release
-   ```
+1. **Build**: `cargo build --release`
+2. **Configure**: Create `~/.config/fluxo/config.toml` (see `example.config.toml`).
+3. **Daemon**: Start `fluxo-rs daemon`. It's recommended to run this as a systemd user service.
 
-2. Start the daemon:
-   ```bash
-   # Starts the daemon using the default config path (~/.config/fluxo/config.toml)
-   ./target/release/fluxo-rs daemon &
-   
-   # Or provide a custom path
-   ./target/release/fluxo-rs daemon --config /path/to/your/config.toml &
-   ```
+## Waybar Configuration
 
-3. Configuration:
-   Create `~/.config/fluxo/config.toml` (see `example.config.toml` for all default options).
+To achieve zero-latency updates, use **Waybar Signals**:
 
-4. Waybar configuration (`config.jsonc`):
-   ```json
-   "custom/cpu": {
-       "exec": "~/path/to/fluxo-rs cpu",
-       "return-type": "json"
-   }
-   ```
-
-## Development
-
-### Architecture
-- `src/main.rs`: Entry point, CLI parsing, interactive GUI spawns (menus), and client-side formatting logic.
-- `src/daemon.rs`: UDS listener, configuration management, and polling orchestration.
-- `src/ipc.rs`: Unix domain socket communication logic.
-- `src/utils.rs`: Generic GUI utilities (like the menu spawner).
-- `src/modules/`: Individual metric implementations.
-- `src/state.rs`: Shared thread-safe data structures.
-
-### Adding a Module
-1. Add the required config block to `src/config.rs`.
-2. Add the required state fields to `src/state.rs`.
-3. Implement the `WaybarModule` trait in a new file in `src/modules/`.
-4. Add polling logic to `src/modules/hardware.rs` or `src/daemon.rs`.
-5. Register the new subcommand in `src/main.rs` and the router in `src/daemon.rs`.
-
-### Configuration Reload
-The daemon can reload its configuration live:
-```bash
-fluxo-rs reload
+```jsonc
+"custom/audio": {
+    "exec": "fluxo vol",
+    "return-type": "json",
+    "interval": 5,
+    "signal": 8,
+    "on-click": "fluxo audio cycle sink && pkill -RTMIN+8 waybar"
+},
+"custom/bluetooth": {
+    "exec": "fluxo bt",
+    "return-type": "json",
+    "interval": 5,
+    "signal": 9,
+    "on-click": "fluxo bt menu && pkill -RTMIN+9 waybar",
+    "on-click-right": "fluxo bt cycle_mode && pkill -RTMIN+9 waybar"
+}
 ```
 
-### Logging & Debugging
-`fluxo-rs` uses the `tracing` ecosystem. If a module isn't behaving properly or your configuration isn't applying, start the daemon with debug logging enabled in the foreground:
+## Debugging
+
+Start the daemon with `RUST_LOG=debug` to see detailed logs of library interactions and circuit breaker status:
 ```bash
 RUST_LOG=debug fluxo-rs daemon
 ```
-This will print verbose information regarding config parsing errors, subprocess failures, and IPC requests.
