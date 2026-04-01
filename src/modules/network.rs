@@ -1,9 +1,9 @@
 use crate::config::Config;
+use crate::error::Result;
 use crate::modules::WaybarModule;
 use crate::output::WaybarOutput;
 use crate::state::SharedState;
 use crate::utils::{TokenValue, format_template};
-use anyhow::Result;
 use nix::ifaddrs::getifaddrs;
 use std::fs;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -29,7 +29,7 @@ impl NetworkDaemon {
         }
     }
 
-    pub fn poll(&mut self, state: SharedState) {
+    pub async fn poll(&mut self, state: SharedState) {
         // Re-detect interface on every poll to catch VPNs or route changes immediately
         if let Ok(iface) = get_primary_interface()
             && !iface.is_empty()
@@ -62,14 +62,14 @@ impl NetworkDaemon {
                         / 1024.0
                         / 1024.0;
 
-                    if let Ok(mut state_lock) = state.write() {
-                        state_lock.network.rx_mbps = rx_mbps;
-                        state_lock.network.tx_mbps = tx_mbps;
-                        state_lock.network.interface = interface.clone();
-                        state_lock.network.ip = self.cached_ip.clone().unwrap_or_default();
-                    }
-                } else if let Ok(mut state_lock) = state.write() {
+                    let mut state_lock = state.write().await;
+                    state_lock.network.rx_mbps = rx_mbps;
+                    state_lock.network.tx_mbps = tx_mbps;
+                    state_lock.network.interface = interface.clone();
+                    state_lock.network.ip = self.cached_ip.clone().unwrap_or_default();
+                } else {
                     // First poll: no speed data yet, but update interface/ip
+                    let mut state_lock = state.write().await;
                     state_lock.network.interface = interface.clone();
                     state_lock.network.ip = self.cached_ip.clone().unwrap_or_default();
                 }
@@ -81,8 +81,9 @@ impl NetworkDaemon {
                 // Read failed, might be down
                 self.cached_interface = None;
             }
-        } else if let Ok(mut state_lock) = state.write() {
+        } else {
             // No interface detected
+            let mut state_lock = state.write().await;
             state_lock.network.interface.clear();
             state_lock.network.ip.clear();
         }
@@ -90,21 +91,20 @@ impl NetworkDaemon {
 }
 
 impl WaybarModule for NetworkModule {
-    fn run(&self, config: &Config, state: &SharedState, _args: &[&str]) -> Result<WaybarOutput> {
-        let (interface, ip, rx_mbps, tx_mbps) = if let Ok(s) = state.read() {
+    async fn run(
+        &self,
+        config: &Config,
+        state: &SharedState,
+        _args: &[&str],
+    ) -> Result<WaybarOutput> {
+        let (interface, ip, rx_mbps, tx_mbps) = {
+            let s = state.read().await;
             (
                 s.network.interface.clone(),
                 s.network.ip.clone(),
                 s.network.rx_mbps,
                 s.network.tx_mbps,
             )
-        } else {
-            return Ok(WaybarOutput {
-                text: "No connection".to_string(),
-                tooltip: None,
-                class: None,
-                percentage: None,
-            });
         };
 
         if interface.is_empty() {
@@ -208,16 +208,16 @@ mod tests {
     use super::*;
     use crate::state::{AppState, NetworkState, mock_state};
 
-    #[test]
-    fn test_network_no_connection() {
+    #[tokio::test]
+    async fn test_network_no_connection() {
         let state = mock_state(AppState::default());
         let config = Config::default();
-        let output = NetworkModule.run(&config, &state, &[]).unwrap();
+        let output = NetworkModule.run(&config, &state, &[]).await.unwrap();
         assert_eq!(output.text, "No connection");
     }
 
-    #[test]
-    fn test_network_connected() {
+    #[tokio::test]
+    async fn test_network_connected() {
         let state = mock_state(AppState {
             network: NetworkState {
                 rx_mbps: 1.5,
@@ -228,15 +228,15 @@ mod tests {
             ..Default::default()
         });
         let config = Config::default();
-        let output = NetworkModule.run(&config, &state, &[]).unwrap();
+        let output = NetworkModule.run(&config, &state, &[]).await.unwrap();
         assert!(output.text.contains("eth0"));
         assert!(output.text.contains("192.168.1.100"));
         assert!(output.text.contains("1.50"));
         assert_eq!(output.class.as_deref(), Some("eth0"));
     }
 
-    #[test]
-    fn test_network_vpn_prefix() {
+    #[tokio::test]
+    async fn test_network_vpn_prefix() {
         let state = mock_state(AppState {
             network: NetworkState {
                 rx_mbps: 0.0,
@@ -247,12 +247,12 @@ mod tests {
             ..Default::default()
         });
         let config = Config::default();
-        let output = NetworkModule.run(&config, &state, &[]).unwrap();
+        let output = NetworkModule.run(&config, &state, &[]).await.unwrap();
         assert!(output.text.starts_with("  "));
     }
 
-    #[test]
-    fn test_network_no_ip() {
+    #[tokio::test]
+    async fn test_network_no_ip() {
         let state = mock_state(AppState {
             network: NetworkState {
                 rx_mbps: 0.0,
@@ -263,7 +263,7 @@ mod tests {
             ..Default::default()
         });
         let config = Config::default();
-        let output = NetworkModule.run(&config, &state, &[]).unwrap();
+        let output = NetworkModule.run(&config, &state, &[]).await.unwrap();
         assert!(output.text.contains("No IP"));
     }
 }

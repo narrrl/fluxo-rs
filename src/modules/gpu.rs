@@ -1,36 +1,30 @@
 use crate::config::Config;
+use crate::error::Result;
 use crate::modules::WaybarModule;
 use crate::output::WaybarOutput;
 use crate::state::SharedState;
 use crate::utils::{TokenValue, format_template};
-use anyhow::Result;
 
 pub struct GpuModule;
 
 impl WaybarModule for GpuModule {
-    fn run(&self, config: &Config, state: &SharedState, _args: &[&str]) -> Result<WaybarOutput> {
+    async fn run(
+        &self,
+        config: &Config,
+        state: &SharedState,
+        _args: &[&str],
+    ) -> Result<WaybarOutput> {
         let (active, vendor, usage, vram_used, vram_total, temp, model) = {
-            if let Ok(state_lock) = state.read() {
-                (
-                    state_lock.gpu.active,
-                    state_lock.gpu.vendor.clone(),
-                    state_lock.gpu.usage,
-                    state_lock.gpu.vram_used,
-                    state_lock.gpu.vram_total,
-                    state_lock.gpu.temp,
-                    state_lock.gpu.model.clone(),
-                )
-            } else {
-                (
-                    false,
-                    String::from("Unknown"),
-                    0.0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    String::from("Unknown"),
-                )
-            }
+            let state_lock = state.read().await;
+            (
+                state_lock.gpu.active,
+                state_lock.gpu.vendor.clone(),
+                state_lock.gpu.usage,
+                state_lock.gpu.vram_used,
+                state_lock.gpu.vram_total,
+                state_lock.gpu.temp,
+                state_lock.gpu.model.clone(),
+            )
         };
 
         if !active {

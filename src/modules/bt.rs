@@ -1,4 +1,5 @@
 use crate::config::Config;
+use crate::error::Result as FluxoResult;
 use crate::modules::WaybarModule;
 use crate::output::WaybarOutput;
 use crate::state::{BtState, SharedState};
@@ -8,8 +9,8 @@ use futures::StreamExt;
 use std::collections::HashMap;
 use std::process::Command;
 use std::sync::{Arc, LazyLock, Mutex};
-use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
+use tokio::time::{Duration, Instant};
 use tracing::{debug, error, info, warn};
 
 // Maestro imports
@@ -21,13 +22,6 @@ use maestro::pwrpc::client::{Client, ClientHandle};
 use maestro::service::MaestroService;
 #[allow(unused_imports)]
 use maestro::service::settings::{self, Setting, SettingValue};
-
-static RUNTIME: LazyLock<tokio::runtime::Runtime> = LazyLock::new(|| {
-    tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("Failed to create BT tokio runtime")
-});
 
 #[derive(Clone, Default)]
 struct BudsStatus {
@@ -319,8 +313,8 @@ impl BtDaemon {
         Self { session: None }
     }
 
-    pub fn poll(&mut self, state: SharedState) {
-        if let Err(e) = RUNTIME.block_on(self.poll_async(state)) {
+    pub async fn poll(&mut self, state: SharedState) {
+        if let Err(e) = self.poll_async(state).await {
             error!("BT daemon error: {}", e);
         }
     }
@@ -388,9 +382,8 @@ impl BtDaemon {
             }
         }
 
-        if let Ok(mut lock) = state.write() {
-            lock.bluetooth = bt_state;
-        }
+        let mut lock = state.write().await;
+        lock.bluetooth = bt_state;
 
         Ok(())
     }
@@ -486,10 +479,15 @@ static PLUGINS: LazyLock<Vec<Box<dyn BtPlugin>>> =
 pub struct BtModule;
 
 impl WaybarModule for BtModule {
-    fn run(&self, config: &Config, state: &SharedState, args: &[&str]) -> Result<WaybarOutput> {
+    async fn run(
+        &self,
+        config: &Config,
+        state: &SharedState,
+        args: &[&str],
+    ) -> FluxoResult<WaybarOutput> {
         let action = args.first().unwrap_or(&"show");
         let bt_state = {
-            let lock = state.read().unwrap();
+            let lock = state.read().await;
             lock.bluetooth.clone()
         };
 

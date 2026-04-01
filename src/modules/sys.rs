@@ -1,26 +1,28 @@
 use crate::config::Config;
+use crate::error::Result;
 use crate::modules::WaybarModule;
 use crate::output::WaybarOutput;
 use crate::state::SharedState;
 use crate::utils::{TokenValue, format_template};
-use anyhow::Result;
 
 pub struct SysModule;
 
 impl WaybarModule for SysModule {
-    fn run(&self, config: &Config, state: &SharedState, _args: &[&str]) -> Result<WaybarOutput> {
+    async fn run(
+        &self,
+        config: &Config,
+        state: &SharedState,
+        _args: &[&str],
+    ) -> Result<WaybarOutput> {
         let (load1, load5, load15, uptime_secs, process_count) = {
-            if let Ok(state_lock) = state.read() {
-                (
-                    state_lock.sys.load_1,
-                    state_lock.sys.load_5,
-                    state_lock.sys.load_15,
-                    state_lock.sys.uptime,
-                    state_lock.sys.process_count,
-                )
-            } else {
-                (0.0, 0.0, 0.0, 0, 0)
-            }
+            let state_lock = state.read().await;
+            (
+                state_lock.sys.load_1,
+                state_lock.sys.load_5,
+                state_lock.sys.load_15,
+                state_lock.sys.uptime,
+                state_lock.sys.process_count,
+            )
         };
 
         let hours = uptime_secs / 3600;

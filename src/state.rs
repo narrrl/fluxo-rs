@@ -1,4 +1,7 @@
-use std::sync::{Arc, RwLock};
+use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::sync::RwLock;
+use tokio::time::Instant;
 
 #[derive(Default, Clone)]
 pub struct AppState {
@@ -10,6 +13,14 @@ pub struct AppState {
     pub disks: Vec<DiskInfo>,
     pub bluetooth: BtState,
     pub audio: AudioState,
+    pub health: HashMap<String, ModuleHealth>,
+}
+
+#[derive(Clone, Default)]
+pub struct ModuleHealth {
+    pub consecutive_failures: u32,
+    pub last_failure: Option<Instant>,
+    pub backoff_until: Option<Instant>,
 }
 
 #[derive(Default, Clone)]

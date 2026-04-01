@@ -1,18 +1,22 @@
 use crate::config::Config;
+use crate::error::Result;
 use crate::modules::WaybarModule;
 use crate::output::WaybarOutput;
 use crate::state::SharedState;
 use crate::utils::{TokenValue, format_template};
-use anyhow::Result;
 
 pub struct BtrfsModule;
 
 impl WaybarModule for BtrfsModule {
-    fn run(&self, config: &Config, state: &SharedState, _args: &[&str]) -> Result<WaybarOutput> {
-        let disks = if let Ok(s) = state.read() {
+    async fn run(
+        &self,
+        config: &Config,
+        state: &SharedState,
+        _args: &[&str],
+    ) -> Result<WaybarOutput> {
+        let disks = {
+            let s = state.read().await;
             s.disks.clone()
-        } else {
-            return Err(anyhow::anyhow!("Failed to read state"));
         };
 
         let mut total_used: f64 = 0.0;
