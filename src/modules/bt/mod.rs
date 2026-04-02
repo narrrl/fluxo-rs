@@ -5,11 +5,11 @@ use crate::config::Config;
 use crate::error::Result as FluxoResult;
 use crate::modules::WaybarModule;
 use crate::output::WaybarOutput;
-use crate::state::{BtState, SharedState};
+use crate::state::{AppReceivers, BtState};
 use crate::utils::{TokenValue, format_template};
 use anyhow::Result;
-use std::process::Command;
-use std::sync::{Arc, LazyLock};
+use std::sync::LazyLock;
+use tokio::sync::watch;
 use tracing::{error, warn};
 
 use self::buds::{BtPlugin, PixelBudsPlugin};
@@ -23,13 +23,23 @@ impl BtDaemon {
         Self { session: None }
     }
 
-    pub async fn poll(&mut self, state: SharedState, config: &Config) {
-        if let Err(e) = self.poll_async(state, config).await {
+    pub async fn poll(
+        &mut self,
+        tx: &watch::Sender<BtState>,
+        state: &AppReceivers,
+        config: &Config,
+    ) {
+        if let Err(e) = self.poll_async(tx, state, config).await {
             error!("BT daemon error: {}", e);
         }
     }
 
-    async fn poll_async(&mut self, state: SharedState, config: &Config) -> Result<()> {
+    async fn poll_async(
+        &mut self,
+        tx: &watch::Sender<BtState>,
+        state: &AppReceivers,
+        config: &Config,
+    ) -> Result<()> {
         if self.session.is_none() {
             self.session = Some(bluer::Session::new().await?);
         }
@@ -60,7 +70,7 @@ impl BtDaemon {
 
                         for p in PLUGINS.iter() {
                             if p.can_handle(&bt_state.device_alias, &bt_state.device_address) {
-                                match p.get_data(config, &state, &bt_state.device_address).await {
+                                match p.get_data(config, state, &bt_state.device_address).await {
                                     Ok(data) => {
                                         bt_state.plugin_data = data
                                             .into_iter()
@@ -90,8 +100,7 @@ impl BtDaemon {
             }
         }
 
-        let mut lock = state.write().await;
-        lock.bluetooth = bt_state;
+        let _ = tx.send(bt_state);
 
         Ok(())
     }
@@ -103,134 +112,128 @@ static PLUGINS: LazyLock<Vec<Box<dyn BtPlugin>>> =
 pub struct BtModule;
 
 impl WaybarModule for BtModule {
-    fn run(
+    async fn run(
         &self,
         config: &Config,
-        state: &SharedState,
+        state: &AppReceivers,
         args: &[&str],
-    ) -> impl std::future::Future<Output = FluxoResult<WaybarOutput>> + Send {
+    ) -> FluxoResult<WaybarOutput> {
         let action = args.first().cloned().unwrap_or("show").to_string();
         let args = args.iter().map(|s| s.to_string()).collect::<Vec<_>>();
-        let state = Arc::clone(state);
-        let config = config.clone();
 
-        async move {
-            let bt_state = {
-                let lock = state.read().await;
-                lock.bluetooth.clone()
-            };
+        let bt_state = state.bluetooth.borrow().clone();
 
-            match action.as_str() {
-                "disconnect" if bt_state.connected => {
-                    let _ = Command::new("bluetoothctl")
-                        .args(["disconnect", &bt_state.device_address])
-                        .output();
-                    return Ok(WaybarOutput::default());
+        match action.as_str() {
+            "disconnect" if bt_state.connected => {
+                let _ = tokio::process::Command::new("bluetoothctl")
+                    .args(["disconnect", &bt_state.device_address])
+                    .output()
+                    .await;
+                return Ok(WaybarOutput::default());
+            }
+            "cycle_mode" if bt_state.connected => {
+                let plugin = PLUGINS
+                    .iter()
+                    .find(|p| p.can_handle(&bt_state.device_alias, &bt_state.device_address));
+                if let Some(p) = plugin {
+                    p.cycle_mode(&bt_state.device_address, state).await?;
                 }
-                "cycle_mode" if bt_state.connected => {
+                return Ok(WaybarOutput::default());
+            }
+            "get_modes" if bt_state.connected => {
+                let plugin = PLUGINS
+                    .iter()
+                    .find(|p| p.can_handle(&bt_state.device_alias, &bt_state.device_address));
+                let modes = if let Some(p) = plugin {
+                    p.get_modes(&bt_state.device_address, state).await?
+                } else {
+                    vec![]
+                };
+                return Ok(WaybarOutput {
+                    text: modes.join("\n"),
+                    ..Default::default()
+                });
+            }
+            "set_mode" if bt_state.connected => {
+                if let Some(mode) = args.get(1) {
                     let plugin = PLUGINS
                         .iter()
                         .find(|p| p.can_handle(&bt_state.device_alias, &bt_state.device_address));
                     if let Some(p) = plugin {
-                        p.cycle_mode(&bt_state.device_address, &state).await?;
+                        p.set_mode(mode, &bt_state.device_address, state).await?;
                     }
-                    return Ok(WaybarOutput::default());
                 }
-                "get_modes" if bt_state.connected => {
-                    let plugin = PLUGINS
-                        .iter()
-                        .find(|p| p.can_handle(&bt_state.device_alias, &bt_state.device_address));
-                    let modes = if let Some(p) = plugin {
-                        p.get_modes(&bt_state.device_address, &state).await?
-                    } else {
-                        vec![]
-                    };
-                    return Ok(WaybarOutput {
-                        text: modes.join("\n"),
-                        ..Default::default()
-                    });
-                }
-                "set_mode" if bt_state.connected => {
-                    if let Some(mode) = args.get(1) {
-                        let plugin = PLUGINS.iter().find(|p| {
-                            p.can_handle(&bt_state.device_alias, &bt_state.device_address)
-                        });
-                        if let Some(p) = plugin {
-                            p.set_mode(mode, &bt_state.device_address, &state).await?;
-                        }
-                    }
-                    return Ok(WaybarOutput::default());
-                }
-                "show" => {}
-                _ => {}
+                return Ok(WaybarOutput::default());
             }
+            "show" => {}
+            _ => {}
+        }
 
-            if !bt_state.adapter_powered {
-                return Ok(WaybarOutput {
-                    text: config.bt.format_disabled.clone(),
-                    tooltip: Some("Bluetooth Disabled".to_string()),
-                    class: Some("disabled".to_string()),
-                    percentage: None,
-                });
-            }
+        if !bt_state.adapter_powered {
+            return Ok(WaybarOutput {
+                text: config.bt.format_disabled.clone(),
+                tooltip: Some("Bluetooth Disabled".to_string()),
+                class: Some("disabled".to_string()),
+                percentage: None,
+            });
+        }
 
-            if bt_state.connected {
-                let mut tokens: Vec<(String, TokenValue)> = vec![
-                    (
-                        "alias".to_string(),
-                        TokenValue::String(bt_state.device_alias.clone()),
-                    ),
-                    (
-                        "mac".to_string(),
-                        TokenValue::String(bt_state.device_address.clone()),
-                    ),
-                ];
+        if bt_state.connected {
+            let mut tokens: Vec<(String, TokenValue)> = vec![
+                (
+                    "alias".to_string(),
+                    TokenValue::String(bt_state.device_alias.clone()),
+                ),
+                (
+                    "mac".to_string(),
+                    TokenValue::String(bt_state.device_address.clone()),
+                ),
+            ];
 
-                let mut class = vec!["connected".to_string()];
-                let mut has_plugin = false;
+            let mut class = vec!["connected".to_string()];
+            let mut has_plugin = false;
 
-                for (k, v) in &bt_state.plugin_data {
-                    if k == "plugin_class" {
-                        class.push(v.clone());
-                        has_plugin = true;
-                    } else if k == "plugin_error" {
-                        class.push("plugin-error".to_string());
-                    } else {
-                        tokens.push((k.clone(), TokenValue::String(v.clone())));
-                    }
-                }
-
-                let format = if has_plugin {
-                    &config.bt.format_plugin
+            for (k, v) in &bt_state.plugin_data {
+                if k == "plugin_class" {
+                    class.push(v.clone());
+                    has_plugin = true;
+                } else if k == "plugin_error" {
+                    class.push("plugin-error".to_string());
                 } else {
-                    &config.bt.format_connected
-                };
-
-                let text = format_template(format, &tokens);
-                let tooltip = format!(
-                    "{} | MAC: {}\nBattery: {}",
-                    bt_state.device_alias,
-                    bt_state.device_address,
-                    bt_state
-                        .battery_percentage
-                        .map(|b| format!("{}%", b))
-                        .unwrap_or_else(|| "N/A".to_string())
-                );
-
-                Ok(WaybarOutput {
-                    text,
-                    tooltip: Some(tooltip),
-                    class: Some(class.join(" ")),
-                    percentage: bt_state.battery_percentage,
-                })
-            } else {
-                Ok(WaybarOutput {
-                    text: config.bt.format_disconnected.clone(),
-                    tooltip: Some("Bluetooth On (Disconnected)".to_string()),
-                    class: Some("disconnected".to_string()),
-                    percentage: None,
-                })
+                    tokens.push((k.clone(), TokenValue::String(v.clone())));
+                }
             }
+
+            let format = if has_plugin {
+                &config.bt.format_plugin
+            } else {
+                &config.bt.format_connected
+            };
+
+            let text = format_template(format, &tokens);
+            let tooltip = format!(
+                "{} | MAC: {}\nBattery: {}",
+                bt_state.device_alias,
+                bt_state.device_address,
+                bt_state
+                    .battery_percentage
+                    .map(|b| format!("{}%", b))
+                    .unwrap_or_else(|| "N/A".to_string())
+            );
+
+            Ok(WaybarOutput {
+                text,
+                tooltip: Some(tooltip),
+                class: Some(class.join(" ")),
+                percentage: bt_state.battery_percentage,
+            })
+        } else {
+            Ok(WaybarOutput {
+                text: config.bt.format_disconnected.clone(),
+                tooltip: Some("Bluetooth On (Disconnected)".to_string()),
+                class: Some("disconnected".to_string()),
+                percentage: None,
+            })
         }
     }
 }

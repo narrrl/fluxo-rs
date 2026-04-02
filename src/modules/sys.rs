@@ -2,7 +2,7 @@ use crate::config::Config;
 use crate::error::Result;
 use crate::modules::WaybarModule;
 use crate::output::WaybarOutput;
-use crate::state::SharedState;
+use crate::state::AppReceivers;
 use crate::utils::{TokenValue, format_template};
 
 pub struct SysModule;
@@ -11,17 +11,17 @@ impl WaybarModule for SysModule {
     async fn run(
         &self,
         config: &Config,
-        state: &SharedState,
+        state: &AppReceivers,
         _args: &[&str],
     ) -> Result<WaybarOutput> {
         let (load1, load5, load15, uptime_secs, process_count) = {
-            let state_lock = state.read().await;
+            let state_lock = state.sys.borrow();
             (
-                state_lock.sys.load_1,
-                state_lock.sys.load_5,
-                state_lock.sys.load_15,
-                state_lock.sys.uptime,
-                state_lock.sys.process_count,
+                state_lock.load_1,
+                state_lock.load_5,
+                state_lock.load_15,
+                state_lock.uptime,
+                state_lock.process_count,
             )
         };
 

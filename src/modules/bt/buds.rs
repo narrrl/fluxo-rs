@@ -1,10 +1,9 @@
 use crate::config::Config;
 use crate::error::{FluxoError, Result as FluxoResult};
-use crate::modules::bt::maestro::{BudsCommand, get_maestro};
-use crate::state::SharedState;
+use crate::modules::bt::maestro::BudsCommand;
+use crate::state::AppReceivers;
 use crate::utils::TokenValue;
 use futures::future::BoxFuture;
-use std::sync::Arc;
 
 pub trait BtPlugin: Send + Sync {
     fn name(&self) -> &str;
@@ -12,21 +11,21 @@ pub trait BtPlugin: Send + Sync {
     fn get_data(
         &self,
         config: &Config,
-        state: &SharedState,
+        state: &AppReceivers,
         mac: &str,
     ) -> BoxFuture<'static, FluxoResult<Vec<(String, TokenValue)>>>;
     fn get_modes(
         &self,
         mac: &str,
-        state: &SharedState,
+        state: &AppReceivers,
     ) -> BoxFuture<'static, FluxoResult<Vec<String>>>;
     fn set_mode(
         &self,
         mode: &str,
         mac: &str,
-        state: &SharedState,
+        state: &AppReceivers,
     ) -> BoxFuture<'static, FluxoResult<()>>;
-    fn cycle_mode(&self, mac: &str, state: &SharedState) -> BoxFuture<'static, FluxoResult<()>>;
+    fn cycle_mode(&self, mac: &str, state: &AppReceivers) -> BoxFuture<'static, FluxoResult<()>>;
 }
 
 pub struct PixelBudsPlugin;
@@ -43,13 +42,13 @@ impl BtPlugin for PixelBudsPlugin {
     fn get_data(
         &self,
         _config: &Config,
-        state: &SharedState,
+        state: &AppReceivers,
         mac: &str,
     ) -> BoxFuture<'static, FluxoResult<Vec<(String, TokenValue)>>> {
         let mac = mac.to_string();
-        let state = Arc::clone(state);
+        let state = state.clone();
         Box::pin(async move {
-            let maestro = get_maestro(&state);
+            let maestro = crate::modules::bt::maestro::get_maestro(&state);
             maestro.ensure_task(&mac);
             let status = maestro.get_status(&mac);
 
@@ -91,7 +90,7 @@ impl BtPlugin for PixelBudsPlugin {
     fn get_modes(
         &self,
         _mac: &str,
-        _state: &SharedState,
+        _state: &AppReceivers,
     ) -> BoxFuture<'static, FluxoResult<Vec<String>>> {
         Box::pin(async move {
             Ok(vec![
@@ -106,13 +105,13 @@ impl BtPlugin for PixelBudsPlugin {
         &self,
         mode: &str,
         mac: &str,
-        state: &SharedState,
+        state: &AppReceivers,
     ) -> BoxFuture<'static, FluxoResult<()>> {
         let mode = mode.to_string();
         let mac = mac.to_string();
-        let state = Arc::clone(state);
+        let state = state.clone();
         Box::pin(async move {
-            get_maestro(&state)
+            crate::modules::bt::maestro::get_maestro(&state)
                 .send_command(&mac, BudsCommand::SetAnc(mode))
                 .map_err(|e: anyhow::Error| FluxoError::Module {
                     module: "bt.buds",
@@ -121,17 +120,17 @@ impl BtPlugin for PixelBudsPlugin {
         })
     }
 
-    fn cycle_mode(&self, mac: &str, state: &SharedState) -> BoxFuture<'static, FluxoResult<()>> {
+    fn cycle_mode(&self, mac: &str, state: &AppReceivers) -> BoxFuture<'static, FluxoResult<()>> {
         let mac = mac.to_string();
-        let state = Arc::clone(state);
+        let state = state.clone();
         Box::pin(async move {
-            let status = get_maestro(&state).get_status(&mac);
+            let status = crate::modules::bt::maestro::get_maestro(&state).get_status(&mac);
             let next_mode = match status.anc_state.as_str() {
                 "active" => "aware",
                 "aware" => "off",
                 _ => "active",
             };
-            get_maestro(&state)
+            crate::modules::bt::maestro::get_maestro(&state)
                 .send_command(&mac, BudsCommand::SetAnc(next_mode.to_string()))
                 .map_err(|e: anyhow::Error| FluxoError::Module {
                     module: "bt.buds",

@@ -2,7 +2,7 @@ use crate::config::Config;
 use crate::error::Result;
 use crate::modules::WaybarModule;
 use crate::output::WaybarOutput;
-use crate::state::SharedState;
+use crate::state::AppReceivers;
 use crate::utils::{TokenValue, format_template};
 use std::fs;
 
@@ -12,7 +12,7 @@ impl WaybarModule for PowerModule {
     async fn run(
         &self,
         config: &Config,
-        _state: &SharedState,
+        _state: &AppReceivers,
         _args: &[&str],
     ) -> Result<WaybarOutput> {
         let critical_threshold = 15;

@@ -14,13 +14,13 @@ pub mod sys;
 use crate::config::Config;
 use crate::error::Result as FluxoResult;
 use crate::output::WaybarOutput;
-use crate::state::SharedState;
+use crate::state::AppReceivers;
 
 pub trait WaybarModule {
     fn run(
         &self,
         config: &Config,
-        state: &SharedState,
+        state: &AppReceivers,
         args: &[&str],
     ) -> impl std::future::Future<Output = FluxoResult<WaybarOutput>> + Send;
 }

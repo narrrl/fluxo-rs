@@ -1,5 +1,6 @@
-use crate::state::{DiskInfo, SharedState};
+use crate::state::{CpuState, DiskInfo, GpuState, MemoryState, SysState};
 use sysinfo::{Components, Disks, System};
+use tokio::sync::watch;
 
 pub struct HardwareDaemon {
     sys: System,
@@ -24,7 +25,12 @@ impl HardwareDaemon {
         }
     }
 
-    pub async fn poll_fast(&mut self, state: SharedState) {
+    pub async fn poll_fast(
+        &mut self,
+        cpu_tx: &watch::Sender<CpuState>,
+        mem_tx: &watch::Sender<MemoryState>,
+        sys_tx: &watch::Sender<SysState>,
+    ) {
         self.sys.refresh_cpu_usage();
         self.sys.refresh_memory();
         self.components.refresh(true);
@@ -70,28 +76,37 @@ impl HardwareDaemon {
             }
         }
 
-        let mut state_lock = state.write().await;
-        state_lock.cpu.usage = cpu_usage as f64;
-        state_lock.cpu.temp = cpu_temp;
-        state_lock.cpu.model = cpu_model;
+        let mut cpu = cpu_tx.borrow().clone();
+        cpu.usage = cpu_usage as f64;
+        cpu.temp = cpu_temp;
+        cpu.model = cpu_model;
+        let _ = cpu_tx.send(cpu);
 
-        state_lock.memory.total_gb = total_mem;
-        state_lock.memory.used_gb = used_mem;
+        let mut mem = mem_tx.borrow().clone();
+        mem.total_gb = total_mem;
+        mem.used_gb = used_mem;
+        let _ = mem_tx.send(mem);
 
-        state_lock.sys.load_1 = load_avg.one;
-        state_lock.sys.load_5 = load_avg.five;
-        state_lock.sys.load_15 = load_avg.fifteen;
-        state_lock.sys.uptime = uptime;
-        state_lock.sys.process_count = process_count;
+        let mut sys = sys_tx.borrow().clone();
+        sys.load_1 = load_avg.one;
+        sys.load_5 = load_avg.five;
+        sys.load_15 = load_avg.fifteen;
+        sys.uptime = uptime;
+        sys.process_count = process_count;
+        let _ = sys_tx.send(sys);
     }
 
-    pub async fn poll_slow(&mut self, state: SharedState) {
+    pub async fn poll_slow(
+        &mut self,
+        gpu_tx: &watch::Sender<GpuState>,
+        disks_tx: &watch::Sender<Vec<DiskInfo>>,
+    ) {
         // 1. Gather GPU data outside of lock
         let mut gpu_state = crate::state::GpuState::default();
         self.gpu_poll_counter = (self.gpu_poll_counter + 1) % 5;
         let should_poll_gpu = self.gpu_poll_counter == 0;
         if should_poll_gpu {
-            self.poll_gpu(&mut gpu_state);
+            self.poll_gpu(&mut gpu_state).await;
         }
 
         // 2. Gather Disk data outside of lock
@@ -99,39 +114,43 @@ impl HardwareDaemon {
         self.disk_poll_counter = (self.disk_poll_counter + 1) % 10;
         if self.disk_poll_counter == 0 {
             disks_data = Some(
-                Disks::new_with_refreshed_list()
-                    .iter()
-                    .map(|d| DiskInfo {
-                        mount_point: d.mount_point().to_string_lossy().into_owned(),
-                        filesystem: d.file_system().to_string_lossy().to_lowercase(),
-                        total_bytes: d.total_space(),
-                        available_bytes: d.available_space(),
-                    })
-                    .collect::<Vec<DiskInfo>>(),
+                tokio::task::spawn_blocking(|| {
+                    Disks::new_with_refreshed_list()
+                        .iter()
+                        .map(|d| DiskInfo {
+                            mount_point: d.mount_point().to_string_lossy().into_owned(),
+                            filesystem: d.file_system().to_string_lossy().to_lowercase(),
+                            total_bytes: d.total_space(),
+                            available_bytes: d.available_space(),
+                        })
+                        .collect::<Vec<DiskInfo>>()
+                })
+                .await
+                .unwrap_or_default(),
             );
         }
 
         // 3. Apply to state
-        let mut state_lock = state.write().await;
         if should_poll_gpu {
-            state_lock.gpu = gpu_state;
+            let _ = gpu_tx.send(gpu_state);
         }
 
         if let Some(d) = disks_data {
-            state_lock.disks = d;
+            let _ = disks_tx.send(d);
         }
     }
 
-    fn poll_gpu(&mut self, gpu: &mut crate::state::GpuState) {
+    async fn poll_gpu(&mut self, gpu: &mut crate::state::GpuState) {
         gpu.active = false;
 
         if (self.gpu_vendor.as_deref() == Some("NVIDIA") || self.gpu_vendor.is_none())
-            && let Ok(output) = std::process::Command::new("nvidia-smi")
+            && let Ok(output) = tokio::process::Command::new("nvidia-smi")
                 .args([
                     "--query-gpu=utilization.gpu,memory.used,memory.total,temperature.gpu,name",
                     "--format=csv,noheader,nounits",
                 ])
                 .output()
+                .await
             && output.status.success()
         {
             let stdout = String::from_utf8_lossy(&output.stdout);

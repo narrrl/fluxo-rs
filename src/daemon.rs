@@ -6,14 +6,15 @@ use crate::modules::audio::AudioDaemon;
 use crate::modules::bt::BtDaemon;
 use crate::modules::hardware::HardwareDaemon;
 use crate::modules::network::NetworkDaemon;
-use crate::state::{AppState, SharedState};
+use crate::state::AppReceivers;
 use anyhow::Result;
+use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixListener;
-use tokio::sync::RwLock;
+use tokio::sync::{RwLock, watch};
 use tokio::time::{Duration, Instant, sleep};
 use tracing::{debug, error, info, warn};
 
@@ -36,7 +37,28 @@ pub async fn run_daemon(config_path: Option<PathBuf>) -> Result<()> {
         fs::remove_file(&sock_path)?;
     }
 
-    let state: SharedState = Arc::new(RwLock::new(AppState::default()));
+    let (net_tx, net_rx) = watch::channel(Default::default());
+    let (cpu_tx, cpu_rx) = watch::channel(Default::default());
+    let (mem_tx, mem_rx) = watch::channel(Default::default());
+    let (sys_tx, sys_rx) = watch::channel(Default::default());
+    let (gpu_tx, gpu_rx) = watch::channel(Default::default());
+    let (disks_tx, disks_rx) = watch::channel(Default::default());
+    let (bt_tx, bt_rx) = watch::channel(Default::default());
+    let (audio_tx, audio_rx) = watch::channel(Default::default());
+    let health = Arc::new(RwLock::new(HashMap::new()));
+
+    let receivers = AppReceivers {
+        network: net_rx,
+        cpu: cpu_rx,
+        memory: mem_rx,
+        sys: sys_rx,
+        gpu: gpu_rx,
+        disks: disks_rx,
+        bluetooth: bt_rx,
+        audio: audio_rx,
+        health,
+    };
+
     let listener = UnixListener::bind(&sock_path)?;
     let _guard = SocketGuard {
         path: sock_path.clone(),
@@ -55,54 +77,51 @@ pub async fn run_daemon(config_path: Option<PathBuf>) -> Result<()> {
     let config = Arc::new(RwLock::new(crate::config::load_config(config_path)));
 
     // 1. Network Task
-    let poll_state = Arc::clone(&state);
     tokio::spawn(async move {
         info!("Starting Network polling task");
         let mut daemon = NetworkDaemon::new();
         loop {
-            daemon.poll(Arc::clone(&poll_state)).await;
+            daemon.poll(&net_tx).await;
             sleep(Duration::from_secs(1)).await;
         }
     });
 
     // 2. Fast Hardware Task (CPU, Mem, Load)
-    let poll_state = Arc::clone(&state);
     tokio::spawn(async move {
         info!("Starting Fast Hardware polling task");
         let mut daemon = HardwareDaemon::new();
         loop {
-            daemon.poll_fast(Arc::clone(&poll_state)).await;
+            daemon.poll_fast(&cpu_tx, &mem_tx, &sys_tx).await;
             sleep(Duration::from_secs(1)).await;
         }
     });
 
     // 3. Slow Hardware Task (GPU, Disks)
-    let poll_state = Arc::clone(&state);
     tokio::spawn(async move {
         info!("Starting Slow Hardware polling task");
         let mut daemon = HardwareDaemon::new();
         loop {
-            daemon.poll_slow(Arc::clone(&poll_state)).await;
+            daemon.poll_slow(&gpu_tx, &disks_tx).await;
             sleep(Duration::from_secs(1)).await;
         }
     });
 
     // 4. Bluetooth Task
-    let poll_state = Arc::clone(&state);
     let poll_config = Arc::clone(&config);
+    let poll_receivers = receivers.clone();
     tokio::spawn(async move {
         info!("Starting Bluetooth polling task");
         let mut daemon = BtDaemon::new();
         loop {
             let config = poll_config.read().await;
-            daemon.poll(Arc::clone(&poll_state), &config).await;
+            daemon.poll(&bt_tx, &poll_receivers, &config).await;
             sleep(Duration::from_secs(1)).await;
         }
     });
 
     // 5. Audio Thread (Event driven - pulse usually needs its own thread)
     let audio_daemon = AudioDaemon::new();
-    audio_daemon.start(Arc::clone(&state));
+    audio_daemon.start(&audio_tx);
 
     info!("Fluxo daemon successfully bound to socket: {}", sock_path);
 
@@ -114,7 +133,7 @@ pub async fn run_daemon(config_path: Option<PathBuf>) -> Result<()> {
             res = listener.accept() => {
                 match res {
                     Ok((mut stream, _)) => {
-                        let state_clone = Arc::clone(&state);
+                        let state_clone = receivers.clone();
                         let config_clone = Arc::clone(&config);
                         let cp_clone = config_path_clone.clone();
                         tokio::spawn(async move {
@@ -174,13 +193,13 @@ pub async fn run_daemon(config_path: Option<PathBuf>) -> Result<()> {
 async fn handle_request(
     module_name: &str,
     args: &[&str],
-    state: &SharedState,
+    state: &AppReceivers,
     config_lock: &Arc<RwLock<Config>>,
 ) -> String {
     // 1. Check Circuit Breaker status
     let is_in_backoff = {
-        let lock = state.read().await;
-        if let Some(health) = lock.health.get(module_name) {
+        let lock = state.health.read().await;
+        if let Some(health) = lock.get(module_name) {
             if let Some(until) = health.backoff_until {
                 Instant::now() < until
             } else {
@@ -265,8 +284,8 @@ async fn handle_request(
 
     // 2. Update Health based on result
     {
-        let mut lock = state.write().await;
-        let health = lock.health.entry(module_name.to_string()).or_default();
+        let mut lock = state.health.write().await;
+        let health = lock.entry(module_name.to_string()).or_default();
         match &result {
             Ok(_) => {
                 health.consecutive_failures = 0;

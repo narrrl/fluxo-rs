@@ -2,7 +2,7 @@ use crate::config::Config;
 use crate::error::Result;
 use crate::modules::WaybarModule;
 use crate::output::WaybarOutput;
-use crate::state::SharedState;
+use crate::state::AppReceivers;
 use crate::utils::{TokenValue, format_template};
 
 pub struct GpuModule;
@@ -11,19 +11,19 @@ impl WaybarModule for GpuModule {
     async fn run(
         &self,
         config: &Config,
-        state: &SharedState,
+        state: &AppReceivers,
         _args: &[&str],
     ) -> Result<WaybarOutput> {
         let (active, vendor, usage, vram_used, vram_total, temp, model) = {
-            let state_lock = state.read().await;
+            let s = state.gpu.borrow();
             (
-                state_lock.gpu.active,
-                state_lock.gpu.vendor.clone(),
-                state_lock.gpu.usage,
-                state_lock.gpu.vram_used,
-                state_lock.gpu.vram_total,
-                state_lock.gpu.temp,
-                state_lock.gpu.model.clone(),
+                s.active,
+                s.vendor.clone(),
+                s.usage,
+                s.vram_used,
+                s.vram_total,
+                s.temp,
+                s.model.clone(),
             )
         };
 

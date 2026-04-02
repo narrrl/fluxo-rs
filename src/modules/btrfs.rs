@@ -2,7 +2,7 @@ use crate::config::Config;
 use crate::error::Result;
 use crate::modules::WaybarModule;
 use crate::output::WaybarOutput;
-use crate::state::SharedState;
+use crate::state::AppReceivers;
 use crate::utils::{TokenValue, format_template};
 
 pub struct BtrfsModule;
@@ -11,12 +11,12 @@ impl WaybarModule for BtrfsModule {
     async fn run(
         &self,
         config: &Config,
-        state: &SharedState,
+        state: &AppReceivers,
         _args: &[&str],
     ) -> Result<WaybarOutput> {
         let disks = {
-            let s = state.read().await;
-            s.disks.clone()
+            let s = state.disks.borrow();
+            s.clone()
         };
 
         let mut total_used: f64 = 0.0;

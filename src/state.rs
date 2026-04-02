@@ -1,19 +1,19 @@
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use tokio::sync::{RwLock, watch};
 use tokio::time::Instant;
 
-#[derive(Default, Clone)]
-pub struct AppState {
-    pub network: NetworkState,
-    pub cpu: CpuState,
-    pub memory: MemoryState,
-    pub sys: SysState,
-    pub gpu: GpuState,
-    pub disks: Vec<DiskInfo>,
-    pub bluetooth: BtState,
-    pub audio: AudioState,
-    pub health: HashMap<String, ModuleHealth>,
+#[derive(Clone)]
+pub struct AppReceivers {
+    pub network: watch::Receiver<NetworkState>,
+    pub cpu: watch::Receiver<CpuState>,
+    pub memory: watch::Receiver<MemoryState>,
+    pub sys: watch::Receiver<SysState>,
+    pub gpu: watch::Receiver<GpuState>,
+    pub disks: watch::Receiver<Vec<DiskInfo>>,
+    pub bluetooth: watch::Receiver<BtState>,
+    pub audio: watch::Receiver<AudioState>,
+    pub health: Arc<RwLock<HashMap<String, ModuleHealth>>>,
 }
 
 #[derive(Clone, Default)]
@@ -128,9 +128,64 @@ impl Default for GpuState {
     }
 }
 
-pub type SharedState = Arc<RwLock<AppState>>;
+#[cfg(test)]
+pub struct MockState {
+    pub receivers: AppReceivers,
+    // Keep senders alive so receivers don't return Closed errors
+    _net_tx: watch::Sender<NetworkState>,
+    _cpu_tx: watch::Sender<CpuState>,
+    _mem_tx: watch::Sender<MemoryState>,
+    _sys_tx: watch::Sender<SysState>,
+    _gpu_tx: watch::Sender<GpuState>,
+    _disks_tx: watch::Sender<Vec<DiskInfo>>,
+    _bt_tx: watch::Sender<BtState>,
+    _audio_tx: watch::Sender<AudioState>,
+}
 
 #[cfg(test)]
-pub fn mock_state(state: AppState) -> SharedState {
-    Arc::new(RwLock::new(state))
+#[derive(Default, Clone)]
+pub struct AppState {
+    pub network: NetworkState,
+    pub cpu: CpuState,
+    pub memory: MemoryState,
+    pub sys: SysState,
+    pub gpu: GpuState,
+    pub disks: Vec<DiskInfo>,
+    pub bluetooth: BtState,
+    pub audio: AudioState,
+    pub health: HashMap<String, ModuleHealth>,
+}
+
+#[cfg(test)]
+pub fn mock_state(state: AppState) -> MockState {
+    let (net_tx, net_rx) = watch::channel(state.network);
+    let (cpu_tx, cpu_rx) = watch::channel(state.cpu);
+    let (mem_tx, mem_rx) = watch::channel(state.memory);
+    let (sys_tx, sys_rx) = watch::channel(state.sys);
+    let (gpu_tx, gpu_rx) = watch::channel(state.gpu);
+    let (disks_tx, disks_rx) = watch::channel(state.disks);
+    let (bt_tx, bt_rx) = watch::channel(state.bluetooth);
+    let (audio_tx, audio_rx) = watch::channel(state.audio);
+
+    MockState {
+        receivers: AppReceivers {
+            network: net_rx,
+            cpu: cpu_rx,
+            memory: mem_rx,
+            sys: sys_rx,
+            gpu: gpu_rx,
+            disks: disks_rx,
+            bluetooth: bt_rx,
+            audio: audio_rx,
+            health: Arc::new(RwLock::new(state.health)),
+        },
+        _net_tx: net_tx,
+        _cpu_tx: cpu_tx,
+        _mem_tx: mem_tx,
+        _sys_tx: sys_tx,
+        _gpu_tx: gpu_tx,
+        _disks_tx: disks_tx,
+        _bt_tx: bt_tx,
+        _audio_tx: audio_tx,
+    }
 }

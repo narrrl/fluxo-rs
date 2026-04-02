@@ -2,7 +2,7 @@ use crate::config::Config;
 use crate::error::Result;
 use crate::modules::WaybarModule;
 use crate::output::WaybarOutput;
-use crate::state::SharedState;
+use crate::state::AppReceivers;
 use crate::utils::{TokenValue, format_template};
 
 pub struct CpuModule;
@@ -11,16 +11,12 @@ impl WaybarModule for CpuModule {
     async fn run(
         &self,
         config: &Config,
-        state: &SharedState,
+        state: &AppReceivers,
         _args: &[&str],
     ) -> Result<WaybarOutput> {
         let (usage, temp, model) = {
-            let state_lock = state.read().await;
-            (
-                state_lock.cpu.usage,
-                state_lock.cpu.temp,
-                state_lock.cpu.model.clone(),
-            )
+            let s = state.cpu.borrow();
+            (s.usage, s.temp, s.model.clone())
         };
 
         let text = format_template(
@@ -64,7 +60,7 @@ mod tests {
             ..Default::default()
         });
         let config = Config::default();
-        let output = CpuModule.run(&config, &state, &[]).await.unwrap();
+        let output = CpuModule.run(&config, &state.receivers, &[]).await.unwrap();
         assert!(output.text.contains("25.0"));
         assert!(output.text.contains("45.0"));
         assert_eq!(output.class.as_deref(), Some("normal"));
@@ -83,7 +79,7 @@ mod tests {
             ..Default::default()
         });
         let config = Config::default();
-        let output = CpuModule.run(&config, &state, &[]).await.unwrap();
+        let output = CpuModule.run(&config, &state.receivers, &[]).await.unwrap();
         assert_eq!(output.class.as_deref(), Some("high"));
     }
 
@@ -98,7 +94,7 @@ mod tests {
             ..Default::default()
         });
         let config = Config::default();
-        let output = CpuModule.run(&config, &state, &[]).await.unwrap();
+        let output = CpuModule.run(&config, &state.receivers, &[]).await.unwrap();
         assert_eq!(output.class.as_deref(), Some("max"));
     }
 }

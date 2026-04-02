@@ -2,11 +2,12 @@ use crate::config::Config;
 use crate::error::Result;
 use crate::modules::WaybarModule;
 use crate::output::WaybarOutput;
-use crate::state::SharedState;
+use crate::state::{AppReceivers, NetworkState};
 use crate::utils::{TokenValue, format_template};
 use nix::ifaddrs::getifaddrs;
 use std::fs;
 use std::time::{SystemTime, UNIX_EPOCH};
+use tokio::sync::watch;
 
 pub struct NetworkModule;
 
@@ -29,15 +30,23 @@ impl NetworkDaemon {
         }
     }
 
-    pub async fn poll(&mut self, state: SharedState) {
-        // Re-detect interface on every poll to catch VPNs or route changes immediately
-        if let Ok(iface) = get_primary_interface()
-            && !iface.is_empty()
-        {
-            // If the interface changed, or we don't have an IP yet, update the IP
+    pub async fn poll(&mut self, state_tx: &watch::Sender<NetworkState>) {
+        let (iface, ip_opt, bytes_opt) = tokio::task::spawn_blocking(|| {
+            let iface = get_primary_interface().unwrap_or_default();
+            if iface.is_empty() {
+                return (String::new(), None, None);
+            }
+            let ip = get_ip_address(&iface);
+            let bytes = get_bytes(&iface).ok();
+            (iface, ip, bytes)
+        })
+        .await
+        .unwrap_or((String::new(), None, None));
+
+        if !iface.is_empty() {
             if self.cached_interface.as_ref() != Some(&iface) || self.cached_ip.is_none() {
-                self.cached_ip = get_ip_address(&iface);
-                self.cached_interface = Some(iface);
+                self.cached_ip = ip_opt;
+                self.cached_interface = Some(iface.clone());
             }
         } else {
             self.cached_interface = None;
@@ -50,7 +59,7 @@ impl NetworkDaemon {
                 .unwrap_or_default()
                 .as_secs();
 
-            if let Ok((rx_bytes_now, tx_bytes_now)) = get_bytes(interface) {
+            if let Some((rx_bytes_now, tx_bytes_now)) = bytes_opt {
                 if self.last_time > 0 && time_now > self.last_time {
                     let time_diff = (time_now - self.last_time) as f64;
                     let rx_mbps = (rx_bytes_now.saturating_sub(self.last_rx_bytes)) as f64
@@ -62,16 +71,18 @@ impl NetworkDaemon {
                         / 1024.0
                         / 1024.0;
 
-                    let mut state_lock = state.write().await;
-                    state_lock.network.rx_mbps = rx_mbps;
-                    state_lock.network.tx_mbps = tx_mbps;
-                    state_lock.network.interface = interface.clone();
-                    state_lock.network.ip = self.cached_ip.clone().unwrap_or_default();
+                    let mut network = state_tx.borrow().clone();
+                    network.rx_mbps = rx_mbps;
+                    network.tx_mbps = tx_mbps;
+                    network.interface = interface.clone();
+                    network.ip = self.cached_ip.clone().unwrap_or_default();
+                    let _ = state_tx.send(network);
                 } else {
                     // First poll: no speed data yet, but update interface/ip
-                    let mut state_lock = state.write().await;
-                    state_lock.network.interface = interface.clone();
-                    state_lock.network.ip = self.cached_ip.clone().unwrap_or_default();
+                    let mut network = state_tx.borrow().clone();
+                    network.interface = interface.clone();
+                    network.ip = self.cached_ip.clone().unwrap_or_default();
+                    let _ = state_tx.send(network);
                 }
 
                 self.last_time = time_now;
@@ -83,9 +94,10 @@ impl NetworkDaemon {
             }
         } else {
             // No interface detected
-            let mut state_lock = state.write().await;
-            state_lock.network.interface.clear();
-            state_lock.network.ip.clear();
+            let mut network = state_tx.borrow().clone();
+            network.interface.clear();
+            network.ip.clear();
+            let _ = state_tx.send(network);
         }
     }
 }
@@ -94,17 +106,12 @@ impl WaybarModule for NetworkModule {
     async fn run(
         &self,
         config: &Config,
-        state: &SharedState,
+        state: &AppReceivers,
         _args: &[&str],
     ) -> Result<WaybarOutput> {
         let (interface, ip, rx_mbps, tx_mbps) = {
-            let s = state.read().await;
-            (
-                s.network.interface.clone(),
-                s.network.ip.clone(),
-                s.network.rx_mbps,
-                s.network.tx_mbps,
-            )
+            let s = state.network.borrow();
+            (s.interface.clone(), s.ip.clone(), s.rx_mbps, s.tx_mbps)
         };
 
         if interface.is_empty() {
@@ -148,24 +155,26 @@ impl WaybarModule for NetworkModule {
 }
 
 fn get_primary_interface() -> Result<String> {
-    let content = fs::read_to_string("/proc/net/route")?;
+    let content = std::fs::read_to_string("/proc/net/route")?;
 
     let mut defaults = Vec::new();
     for line in content.lines().skip(1) {
         let parts: Vec<&str> = line.split_whitespace().collect();
-        if parts.len() >= 7 {
+        if parts.len() >= 8 {
             let iface = parts[0];
             let dest = parts[1];
             let metric = parts[6].parse::<i32>().unwrap_or(0);
+            let mask = u32::from_str_radix(parts[7], 16).unwrap_or(0);
 
             if dest == "00000000" {
-                defaults.push((metric, iface.to_string()));
+                defaults.push((mask, metric, iface.to_string()));
             }
         }
     }
 
-    defaults.sort_by_key(|k| k.0);
-    if let Some((_, dev)) = defaults.first() {
+    // Sort by mask descending (longest prefix match first), then by metric ascending
+    defaults.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
+    if let Some((_, _, dev)) = defaults.first() {
         Ok(dev.clone())
     } else {
         Ok(String::new())
@@ -212,7 +221,10 @@ mod tests {
     async fn test_network_no_connection() {
         let state = mock_state(AppState::default());
         let config = Config::default();
-        let output = NetworkModule.run(&config, &state, &[]).await.unwrap();
+        let output = NetworkModule
+            .run(&config, &state.receivers, &[])
+            .await
+            .unwrap();
         assert_eq!(output.text, "No connection");
     }
 
@@ -228,7 +240,10 @@ mod tests {
             ..Default::default()
         });
         let config = Config::default();
-        let output = NetworkModule.run(&config, &state, &[]).await.unwrap();
+        let output = NetworkModule
+            .run(&config, &state.receivers, &[])
+            .await
+            .unwrap();
         assert!(output.text.contains("eth0"));
         assert!(output.text.contains("192.168.1.100"));
         assert!(output.text.contains("1.50"));
@@ -247,7 +262,10 @@ mod tests {
             ..Default::default()
         });
         let config = Config::default();
-        let output = NetworkModule.run(&config, &state, &[]).await.unwrap();
+        let output = NetworkModule
+            .run(&config, &state.receivers, &[])
+            .await
+            .unwrap();
         assert!(output.text.starts_with("  "));
     }
 
@@ -263,7 +281,10 @@ mod tests {
             ..Default::default()
         });
         let config = Config::default();
-        let output = NetworkModule.run(&config, &state, &[]).await.unwrap();
+        let output = NetworkModule
+            .run(&config, &state.receivers, &[])
+            .await
+            .unwrap();
         assert!(output.text.contains("No IP"));
     }
 }

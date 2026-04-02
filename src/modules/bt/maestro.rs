@@ -1,4 +1,4 @@
-use crate::state::SharedState;
+use crate::state::AppReceivers;
 use anyhow::{Context, Result};
 use futures::StreamExt;
 use std::collections::HashMap;
@@ -39,11 +39,11 @@ pub struct MaestroManager {
 }
 
 impl MaestroManager {
-    pub fn new(state: SharedState) -> Self {
+    pub fn new(state: AppReceivers) -> Self {
         let (tx, mut rx) = mpsc::unbounded_channel::<ManagerCommand>();
         let statuses = Arc::new(Mutex::new(HashMap::new()));
         let statuses_clone = Arc::clone(&statuses);
-        let state_clone = Arc::clone(&state);
+        let state_clone = state.clone();
 
         // Start dedicated BT management thread
         std::thread::spawn(move || {
@@ -68,7 +68,7 @@ impl MaestroManager {
 
                                         let mac_clone = mac.clone();
                                         let st_clone = Arc::clone(&statuses_clone);
-                                        let state_inner = Arc::clone(&state_clone);
+                                        let state_inner = state_clone.clone();
 
                                         tokio::task::spawn_local(async move {
                                             if let Err(e) = buds_task(&mac_clone, st_clone, buds_rx, state_inner).await {
@@ -122,7 +122,7 @@ async fn buds_task(
     mac: &str,
     statuses: Arc<Mutex<HashMap<String, BudsStatus>>>,
     mut rx: mpsc::Receiver<BudsCommand>,
-    state: SharedState,
+    state: AppReceivers,
 ) -> Result<()> {
     info!("Starting native Maestro connection task for {}", mac);
 
@@ -215,8 +215,8 @@ async fn buds_task(
 
         // Update health
         {
-            let mut lock = state.write().await;
-            let health = lock.health.entry("bt.buds".to_string()).or_default();
+            let mut lock = state.health.write().await;
+            let health = lock.entry("bt.buds".to_string()).or_default();
             health.consecutive_failures = 0;
             health.backoff_until = None;
         }
@@ -357,6 +357,6 @@ pub fn anc_state_to_string(state: &settings::AncState) -> String {
 
 static MAESTRO: OnceLock<MaestroManager> = OnceLock::new();
 
-pub fn get_maestro(state: &SharedState) -> &MaestroManager {
-    MAESTRO.get_or_init(|| MaestroManager::new(Arc::clone(state)))
+pub fn get_maestro(state: &AppReceivers) -> &MaestroManager {
+    MAESTRO.get_or_init(|| MaestroManager::new(state.clone()))
 }

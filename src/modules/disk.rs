@@ -2,7 +2,7 @@ use crate::config::Config;
 use crate::error::{FluxoError, Result};
 use crate::modules::WaybarModule;
 use crate::output::WaybarOutput;
-use crate::state::SharedState;
+use crate::state::AppReceivers;
 use crate::utils::{TokenValue, format_template};
 
 pub struct DiskModule;
@@ -11,15 +11,12 @@ impl WaybarModule for DiskModule {
     async fn run(
         &self,
         config: &Config,
-        state: &SharedState,
+        state: &AppReceivers,
         args: &[&str],
     ) -> Result<WaybarOutput> {
         let mountpoint = args.first().unwrap_or(&"/");
 
-        let disks = {
-            let s = state.read().await;
-            s.disks.clone()
-        };
+        let disks = state.disks.borrow().clone();
 
         for disk in &disks {
             if disk.mount_point == *mountpoint {
@@ -76,9 +73,9 @@ impl WaybarModule for DiskModule {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::{AppState, DiskInfo, mock_state};
+    use crate::state::{AppState, DiskInfo, MockState, mock_state};
 
-    fn state_with_disk(mount: &str, total: u64, available: u64) -> crate::state::SharedState {
+    fn state_with_disk(mount: &str, total: u64, available: u64) -> MockState {
         mock_state(AppState {
             disks: vec![DiskInfo {
                 mount_point: mount.to_string(),
@@ -95,7 +92,10 @@ mod tests {
         let gb = 1024 * 1024 * 1024;
         let state = state_with_disk("/", 100 * gb, 60 * gb);
         let config = Config::default();
-        let output = DiskModule.run(&config, &state, &["/"]).await.unwrap();
+        let output = DiskModule
+            .run(&config, &state.receivers, &["/"])
+            .await
+            .unwrap();
         assert_eq!(output.class.as_deref(), Some("normal"));
         assert_eq!(output.percentage, Some(40)); // 40% used
     }
@@ -105,7 +105,10 @@ mod tests {
         let gb = 1024 * 1024 * 1024;
         let state = state_with_disk("/", 100 * gb, 15 * gb);
         let config = Config::default();
-        let output = DiskModule.run(&config, &state, &["/"]).await.unwrap();
+        let output = DiskModule
+            .run(&config, &state.receivers, &["/"])
+            .await
+            .unwrap();
         assert_eq!(output.class.as_deref(), Some("high")); // 85% used
     }
 
@@ -113,7 +116,9 @@ mod tests {
     async fn test_disk_not_found() {
         let state = mock_state(AppState::default());
         let config = Config::default();
-        let result = DiskModule.run(&config, &state, &["/nonexistent"]).await;
+        let result = DiskModule
+            .run(&config, &state.receivers, &["/nonexistent"])
+            .await;
         assert!(result.is_err());
     }
 }

@@ -2,7 +2,7 @@ use crate::config::Config;
 use crate::error::Result;
 use crate::modules::WaybarModule;
 use crate::output::WaybarOutput;
-use crate::state::SharedState;
+use crate::state::AppReceivers;
 use crate::utils::{TokenValue, format_template};
 
 pub struct MemoryModule;
@@ -11,12 +11,12 @@ impl WaybarModule for MemoryModule {
     async fn run(
         &self,
         config: &Config,
-        state: &SharedState,
+        state: &AppReceivers,
         _args: &[&str],
     ) -> Result<WaybarOutput> {
         let (used_gb, total_gb) = {
-            let state_lock = state.read().await;
-            (state_lock.memory.used_gb, state_lock.memory.total_gb)
+            let s = state.memory.borrow();
+            (s.used_gb, s.total_gb)
         };
 
         let ratio = if total_gb > 0.0 {
@@ -65,7 +65,10 @@ mod tests {
             ..Default::default()
         });
         let config = Config::default();
-        let output = MemoryModule.run(&config, &state, &[]).await.unwrap();
+        let output = MemoryModule
+            .run(&config, &state.receivers, &[])
+            .await
+            .unwrap();
         assert!(output.text.contains("8.00"));
         assert!(output.text.contains("32.00"));
         assert_eq!(output.class.as_deref(), Some("normal"));
@@ -82,7 +85,10 @@ mod tests {
             ..Default::default()
         });
         let config = Config::default();
-        let output = MemoryModule.run(&config, &state, &[]).await.unwrap();
+        let output = MemoryModule
+            .run(&config, &state.receivers, &[])
+            .await
+            .unwrap();
         assert_eq!(output.class.as_deref(), Some("high")); // 81%
     }
 
@@ -96,7 +102,10 @@ mod tests {
             ..Default::default()
         });
         let config = Config::default();
-        let output = MemoryModule.run(&config, &state, &[]).await.unwrap();
+        let output = MemoryModule
+            .run(&config, &state.receivers, &[])
+            .await
+            .unwrap();
         assert_eq!(output.class.as_deref(), Some("normal"));
         assert_eq!(output.percentage, Some(0));
     }
