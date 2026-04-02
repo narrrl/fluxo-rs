@@ -18,6 +18,15 @@ pub enum FluxoError {
     #[error("External system error: {0}")]
     System(String),
 
+    #[error("Bluetooth error: {0}")]
+    Bluetooth(String),
+
+    #[error("Network error: {0}")]
+    Network(String),
+
+    #[error("Hardware error: {0}")]
+    Hardware(String),
+
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 
@@ -26,6 +35,20 @@ pub enum FluxoError {
 
     #[error("Other error: {0}")]
     Other(#[from] anyhow::Error),
+}
+
+impl FluxoError {
+    pub fn is_transient(&self) -> bool {
+        matches!(
+            self,
+            Self::Io(_)
+                | Self::System(_)
+                | Self::Bluetooth(_)
+                | Self::Network(_)
+                | Self::Hardware(_)
+                | Self::Module { .. }
+        )
+    }
 }
 
 pub type Result<T> = std::result::Result<T, FluxoError>;

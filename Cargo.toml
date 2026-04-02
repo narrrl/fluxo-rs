@@ -18,7 +18,7 @@ tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 maestro = { git = "https://github.com/qzed/pbpctrl", package = "maestro" }
 bluer = { version = "0.17", features = ["bluetoothd", "rfcomm", "id"] }
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "time", "macros", "signal", "process"] }
-tokio-util = { version = "0.7", features = ["codec"] }
+tokio-util = { version = "0.7", features = ["codec", "time"] }
 futures = "0.3"
 libpulse-binding = "2.30"
 nix = { version = "0.31", features = ["net"] }

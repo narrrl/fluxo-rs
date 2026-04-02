@@ -19,6 +19,8 @@ pub struct NetworkDaemon {
     cached_ip: Option<String>,
 }
 
+type PollResult = crate::error::Result<(String, Option<String>, Option<(u64, u64)>)>;
+
 impl NetworkDaemon {
     pub fn new() -> Self {
         Self {
@@ -30,18 +32,21 @@ impl NetworkDaemon {
         }
     }
 
-    pub async fn poll(&mut self, state_tx: &watch::Sender<NetworkState>) {
-        let (iface, ip_opt, bytes_opt) = tokio::task::spawn_blocking(|| {
-            let iface = get_primary_interface().unwrap_or_default();
+    pub async fn poll(
+        &mut self,
+        state_tx: &watch::Sender<NetworkState>,
+    ) -> crate::error::Result<()> {
+        let (iface, ip_opt, bytes_opt) = tokio::task::spawn_blocking(|| -> PollResult {
+            let iface = get_primary_interface()?;
             if iface.is_empty() {
-                return (String::new(), None, None);
+                return Ok((String::new(), None, None));
             }
             let ip = get_ip_address(&iface);
             let bytes = get_bytes(&iface).ok();
-            (iface, ip, bytes)
+            Ok((iface, ip, bytes))
         })
         .await
-        .unwrap_or((String::new(), None, None));
+        .map_err(|e| crate::error::FluxoError::System(e.to_string()))??;
 
         if !iface.is_empty() {
             if self.cached_interface.as_ref() != Some(&iface) || self.cached_ip.is_none() {
@@ -51,54 +56,77 @@ impl NetworkDaemon {
         } else {
             self.cached_interface = None;
             self.cached_ip = None;
+            // Provide a default state for "No connection"
+            let mut network = state_tx.borrow().clone();
+            network.interface.clear();
+            network.ip.clear();
+            network.rx_mbps = 0.0;
+            network.tx_mbps = 0.0;
+            let _ = state_tx.send(network);
+            return Err(crate::error::FluxoError::Network(
+                "No primary interface found".into(),
+            ));
         }
 
-        if let Some(ref interface) = self.cached_interface {
-            let time_now = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs();
-
-            if let Some((rx_bytes_now, tx_bytes_now)) = bytes_opt {
-                if self.last_time > 0 && time_now > self.last_time {
-                    let time_diff = (time_now - self.last_time) as f64;
-                    let rx_mbps = (rx_bytes_now.saturating_sub(self.last_rx_bytes)) as f64
-                        / time_diff
-                        / 1024.0
-                        / 1024.0;
-                    let tx_mbps = (tx_bytes_now.saturating_sub(self.last_tx_bytes)) as f64
-                        / time_diff
-                        / 1024.0
-                        / 1024.0;
-
-                    let mut network = state_tx.borrow().clone();
-                    network.rx_mbps = rx_mbps;
-                    network.tx_mbps = tx_mbps;
-                    network.interface = interface.clone();
-                    network.ip = self.cached_ip.clone().unwrap_or_default();
-                    let _ = state_tx.send(network);
-                } else {
-                    // First poll: no speed data yet, but update interface/ip
-                    let mut network = state_tx.borrow().clone();
-                    network.interface = interface.clone();
-                    network.ip = self.cached_ip.clone().unwrap_or_default();
-                    let _ = state_tx.send(network);
-                }
-
-                self.last_time = time_now;
-                self.last_rx_bytes = rx_bytes_now;
-                self.last_tx_bytes = tx_bytes_now;
-            } else {
-                // Read failed, might be down
-                self.cached_interface = None;
-            }
+        let interface = if let Some(ref interface) = self.cached_interface {
+            interface.clone()
         } else {
             // No interface detected
             let mut network = state_tx.borrow().clone();
             network.interface.clear();
             network.ip.clear();
+            network.rx_mbps = 0.0;
+            network.tx_mbps = 0.0;
             let _ = state_tx.send(network);
+            return Err(crate::error::FluxoError::Network(
+                "Interface disappeared during poll".into(),
+            ));
+        };
+
+        let time_now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+
+        if let Some((rx_bytes_now, tx_bytes_now)) = bytes_opt {
+            if self.last_time > 0 && time_now > self.last_time {
+                let time_diff = (time_now - self.last_time) as f64;
+                let rx_mbps = (rx_bytes_now.saturating_sub(self.last_rx_bytes)) as f64
+                    / time_diff
+                    / 1024.0
+                    / 1024.0;
+                let tx_mbps = (tx_bytes_now.saturating_sub(self.last_tx_bytes)) as f64
+                    / time_diff
+                    / 1024.0
+                    / 1024.0;
+
+                let mut network = state_tx.borrow().clone();
+                network.rx_mbps = rx_mbps;
+                network.tx_mbps = tx_mbps;
+                network.interface = interface.clone();
+                network.ip = self.cached_ip.clone().unwrap_or_default();
+                let _ = state_tx.send(network);
+            } else {
+                // First poll: no speed data yet, but update interface/ip
+                let mut network = state_tx.borrow().clone();
+                network.interface = interface.clone();
+                network.ip = self.cached_ip.clone().unwrap_or_default();
+                let _ = state_tx.send(network);
+            }
+
+            self.last_time = time_now;
+            self.last_rx_bytes = rx_bytes_now;
+            self.last_tx_bytes = tx_bytes_now;
+        } else {
+            // Read failed, might be down
+            self.cached_interface = None;
+            return Err(crate::error::FluxoError::Network(format!(
+                "Failed to read bytes for {}",
+                interface
+            )));
         }
+
+        Ok(())
     }
 }
 
