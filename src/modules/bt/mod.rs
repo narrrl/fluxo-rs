@@ -109,6 +109,17 @@ impl BtDaemon {
 static PLUGINS: LazyLock<Vec<Box<dyn BtPlugin>>> =
     LazyLock::new(|| vec![Box::new(PixelBudsPlugin)]);
 
+fn trigger_robust_poll(state: AppReceivers) {
+    tokio::spawn(async move {
+        // Poll immediately and then a few times over the next few seconds
+        // to catch slow state changes in bluez or plugins.
+        for delay in [200, 500, 1000, 2000, 3000] {
+            tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
+            let _ = state.bt_force_poll.try_send(());
+        }
+    });
+}
+
 pub struct BtModule;
 
 impl WaybarModule for BtModule {
@@ -124,12 +135,57 @@ impl WaybarModule for BtModule {
         let bt_state = state.bluetooth.borrow().clone();
 
         match action.as_str() {
-            "disconnect" if bt_state.connected => {
-                let _ = tokio::process::Command::new("bluetoothctl")
-                    .args(["disconnect", &bt_state.device_address])
-                    .output()
-                    .await;
+            "connect" => {
+                if let Some(mac) = args.get(1) {
+                    if let Ok(session) = bluer::Session::new().await {
+                        if let Ok(adapter) = session.default_adapter().await {
+                            if let Ok(addr) = mac.parse::<bluer::Address>() {
+                                if let Ok(device) = adapter.device(addr) {
+                                    let _ = device.connect().await;
+                                }
+                            }
+                        }
+                    }
+                    trigger_robust_poll(state.clone());
+                }
                 return Ok(WaybarOutput::default());
+            }
+            "disconnect" if bt_state.connected => {
+                if let Ok(session) = bluer::Session::new().await {
+                    if let Ok(adapter) = session.default_adapter().await {
+                        if let Ok(addr) = bt_state.device_address.parse::<bluer::Address>() {
+                            if let Ok(device) = adapter.device(addr) {
+                                let _ = device.disconnect().await;
+                            }
+                        }
+                    }
+                }
+                trigger_robust_poll(state.clone());
+                return Ok(WaybarOutput::default());
+            }
+            "menu_data" => {
+                let mut devs = Vec::new();
+                if let Ok(session) = bluer::Session::new().await {
+                    if let Ok(adapter) = session.default_adapter().await {
+                        if let Ok(addresses) = adapter.device_addresses().await {
+                            for addr in addresses {
+                                if let Ok(device) = adapter.device(addr) {
+                                    if device.is_paired().await.unwrap_or(false) {
+                                        let alias = device
+                                            .alias()
+                                            .await
+                                            .unwrap_or_else(|_| addr.to_string());
+                                        devs.push(format!("{} ({})", alias, addr));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                return Ok(WaybarOutput {
+                    text: devs.join("\n"),
+                    ..Default::default()
+                });
             }
             "cycle_mode" if bt_state.connected => {
                 let plugin = PLUGINS
@@ -137,6 +193,7 @@ impl WaybarModule for BtModule {
                     .find(|p| p.can_handle(&bt_state.device_alias, &bt_state.device_address));
                 if let Some(p) = plugin {
                     p.cycle_mode(&bt_state.device_address, state).await?;
+                    trigger_robust_poll(state.clone());
                 }
                 return Ok(WaybarOutput::default());
             }
@@ -161,6 +218,7 @@ impl WaybarModule for BtModule {
                         .find(|p| p.can_handle(&bt_state.device_alias, &bt_state.device_address));
                     if let Some(p) = plugin {
                         p.set_mode(mode, &bt_state.device_address, state).await?;
+                        trigger_robust_poll(state.clone());
                     }
                 }
                 return Ok(WaybarOutput::default());

@@ -9,8 +9,22 @@ use libpulse_binding::context::subscribe::{Facility, InterestMaskSet};
 use libpulse_binding::context::{Context, FlagSet as ContextFlag};
 use libpulse_binding::mainloop::threaded::Mainloop as ThreadedMainloop;
 use libpulse_binding::volume::Volume;
-use tokio::sync::watch;
+use tokio::sync::{mpsc, watch};
 use tracing::error;
+
+pub enum AudioCommand {
+    ChangeVolume {
+        is_sink: bool,
+        step_val: u32,
+        is_up: bool,
+    },
+    ToggleMute {
+        is_sink: bool,
+    },
+    CycleDevice {
+        is_sink: bool,
+    },
+}
 
 pub struct AudioDaemon;
 
@@ -19,7 +33,11 @@ impl AudioDaemon {
         Self
     }
 
-    pub fn start(&self, state_tx: &watch::Sender<AudioState>) {
+    pub fn start(
+        &self,
+        state_tx: &watch::Sender<AudioState>,
+        mut cmd_rx: mpsc::Receiver<AudioCommand>,
+    ) {
         let state_tx = state_tx.clone();
 
         std::thread::spawn(move || {
@@ -64,11 +82,12 @@ impl AudioDaemon {
             context.subscribe(interest, |_| {});
 
             let (tx, rx) = std::sync::mpsc::channel();
+            let tx_cb = tx.clone();
 
             context.set_subscribe_callback(Some(Box::new(move |facility, _operation, _index| {
                 match facility {
                     Some(Facility::Sink) | Some(Facility::Source) | Some(Facility::Server) => {
-                        let _ = tx.send(());
+                        let _ = tx_cb.send(());
                     }
                     _ => {}
                 }
@@ -76,14 +95,110 @@ impl AudioDaemon {
 
             mainloop.unlock();
 
-            // Background polling loop driven by events or a 2s fallback timeout
             loop {
-                let _ = rx.recv_timeout(Duration::from_secs(2));
-                {
+                if let Ok(cmd) = cmd_rx.try_recv() {
                     mainloop.lock();
-                    let _ = fetch_audio_data_sync(&mut context, &state_tx);
+                    match cmd {
+                        AudioCommand::ChangeVolume {
+                            is_sink,
+                            step_val,
+                            is_up,
+                        } => {
+                            let current = state_tx.borrow().clone();
+                            let (name, mut vol, channels) = if is_sink {
+                                (
+                                    current.sink.name.clone(),
+                                    current.sink.volume,
+                                    current.sink.channels,
+                                )
+                            } else {
+                                (
+                                    current.source.name.clone(),
+                                    current.source.volume,
+                                    current.source.channels,
+                                )
+                            };
+
+                            if is_up {
+                                vol = vol.saturating_add(step_val as u8).min(150);
+                            } else {
+                                vol = vol.saturating_sub(step_val as u8);
+                            }
+
+                            let pulse_vol = Volume(
+                                (vol as f64 / 100.0 * Volume::NORMAL.0 as f64).round() as u32,
+                            );
+                            let mut cvol = libpulse_binding::volume::ChannelVolumes::default();
+                            cvol.set(channels.max(1), pulse_vol);
+
+                            if is_sink {
+                                context
+                                    .introspect()
+                                    .set_sink_volume_by_name(&name, &cvol, None);
+                            } else {
+                                context
+                                    .introspect()
+                                    .set_source_volume_by_name(&name, &cvol, None);
+                            }
+                        }
+                        AudioCommand::ToggleMute { is_sink } => {
+                            let current = state_tx.borrow().clone();
+                            let (name, muted) = if is_sink {
+                                (current.sink.name.clone(), current.sink.muted)
+                            } else {
+                                (current.source.name.clone(), current.source.muted)
+                            };
+
+                            if is_sink {
+                                context
+                                    .introspect()
+                                    .set_sink_mute_by_name(&name, !muted, None);
+                            } else {
+                                context
+                                    .introspect()
+                                    .set_source_mute_by_name(&name, !muted, None);
+                            }
+                        }
+                        AudioCommand::CycleDevice { is_sink } => {
+                            let current = state_tx.borrow().clone();
+                            let current_name = if is_sink {
+                                current.sink.name.clone()
+                            } else {
+                                current.source.name.clone()
+                            };
+
+                            let devices = if is_sink {
+                                &current.available_sinks
+                            } else {
+                                &current.available_sources
+                            };
+                            if !devices.is_empty() {
+                                let current_idx =
+                                    devices.iter().position(|d| d == &current_name).unwrap_or(0);
+                                let next_idx = (current_idx + 1) % devices.len();
+                                let next_dev = &devices[next_idx];
+
+                                if is_sink {
+                                    context.set_default_sink(next_dev, |_| {});
+                                } else {
+                                    context.set_default_source(next_dev, |_| {});
+                                }
+                            }
+                        }
+                    }
                     mainloop.unlock();
+                    let _ = tx.send(());
                 }
+
+                let _ = rx.recv_timeout(Duration::from_millis(50));
+                while rx.try_recv().is_ok() {}
+
+                mainloop.lock();
+
+                // Fetch data and update available sinks/sources
+                let _ = fetch_audio_data_sync(&mut context, &state_tx);
+
+                mainloop.unlock();
             }
         });
     }
@@ -116,48 +231,84 @@ fn fetch_audio_data_sync(
 
     let tx_sink = state_tx.clone();
     context.introspect().get_sink_info_list(move |res| {
-        if let ListResult::Item(item) = res {
-            let mut current = tx_sink.borrow().clone();
-            // If this matches our default sink name, or if we don't have details for any yet
-            let is_default = item
-                .name
-                .as_ref()
-                .map(|s| s.as_ref() == current.sink.name)
-                .unwrap_or(false);
-            if is_default {
-                current.sink.description = item
-                    .description
+        let mut current = tx_sink.borrow().clone();
+        match res {
+            ListResult::Item(item) => {
+                if let Some(name) = item.name.as_ref() {
+                    let name_str = name.to_string();
+                    if !current.available_sinks.contains(&name_str) {
+                        current.available_sinks.push(name_str);
+                    }
+                }
+
+                let is_default = item
+                    .name
                     .as_ref()
-                    .map(|s| s.to_string())
-                    .unwrap_or_default();
-                current.sink.volume =
-                    ((item.volume.avg().0 as f64 / Volume::NORMAL.0 as f64) * 100.0).round() as u8;
-                current.sink.muted = item.mute;
+                    .map(|s| s.as_ref() == current.sink.name)
+                    .unwrap_or(false);
+                if is_default {
+                    current.sink.description = item
+                        .description
+                        .as_ref()
+                        .map(|s| s.to_string())
+                        .unwrap_or_default();
+                    current.sink.volume = ((item.volume.avg().0 as f64 / Volume::NORMAL.0 as f64)
+                        * 100.0)
+                        .round() as u8;
+                    current.sink.muted = item.mute;
+                    current.sink.channels = item.volume.len();
+                }
                 let _ = tx_sink.send(current);
             }
+            ListResult::End => {
+                // Clear the list on End so it rebuilds fresh next time
+                current.available_sinks.clear();
+                let _ = tx_sink.send(current);
+            }
+            ListResult::Error => {}
         }
     });
 
     let tx_source = state_tx.clone();
     context.introspect().get_source_info_list(move |res| {
-        if let ListResult::Item(item) = res {
-            let mut current = tx_source.borrow().clone();
-            let is_default = item
-                .name
-                .as_ref()
-                .map(|s| s.as_ref() == current.source.name)
-                .unwrap_or(false);
-            if is_default {
-                current.source.description = item
-                    .description
+        let mut current = tx_source.borrow().clone();
+        match res {
+            ListResult::Item(item) => {
+                if let Some(name) = item.name.as_ref() {
+                    let name_str = name.to_string();
+                    // PulseAudio includes monitor sources, ignore them if we want to
+                    if !name_str.contains(".monitor")
+                        && !current.available_sources.contains(&name_str)
+                    {
+                        current.available_sources.push(name_str);
+                    }
+                }
+
+                let is_default = item
+                    .name
                     .as_ref()
-                    .map(|s| s.to_string())
-                    .unwrap_or_default();
-                current.source.volume =
-                    ((item.volume.avg().0 as f64 / Volume::NORMAL.0 as f64) * 100.0).round() as u8;
-                current.source.muted = item.mute;
+                    .map(|s| s.as_ref() == current.source.name)
+                    .unwrap_or(false);
+                if is_default {
+                    current.source.description = item
+                        .description
+                        .as_ref()
+                        .map(|s| s.to_string())
+                        .unwrap_or_default();
+                    current.source.volume = ((item.volume.avg().0 as f64 / Volume::NORMAL.0 as f64)
+                        * 100.0)
+                        .round() as u8;
+                    current.source.muted = item.mute;
+                    current.source.channels = item.volume.len();
+                }
                 let _ = tx_source.send(current);
             }
+            ListResult::End => {
+                // Clear the list on End so it rebuilds fresh next time
+                current.available_sources.clear();
+                let _ = tx_source.send(current);
+            }
+            ListResult::Error => {}
         }
     });
 
@@ -175,10 +326,23 @@ impl WaybarModule for AudioModule {
     ) -> Result<WaybarOutput> {
         let target_type = args.first().unwrap_or(&"sink");
         let action = args.get(1).unwrap_or(&"show");
+        let step = args.get(2).unwrap_or(&"5");
 
         match *action {
+            "up" => {
+                self.change_volume(state, target_type, step, true).await?;
+                Ok(WaybarOutput::default())
+            }
+            "down" => {
+                self.change_volume(state, target_type, step, false).await?;
+                Ok(WaybarOutput::default())
+            }
+            "mute" => {
+                self.toggle_mute(state, target_type).await?;
+                Ok(WaybarOutput::default())
+            }
             "cycle" => {
-                self.cycle_device(target_type).await?;
+                self.cycle_device(state, target_type).await?;
                 Ok(WaybarOutput::default())
             }
             "show" => self.get_status(config, state, target_type).await,
@@ -280,76 +444,41 @@ impl AudioModule {
         })
     }
 
-    async fn cycle_device(&self, target_type: &str) -> Result<()> {
-        // Keep using pactl for cycling for now as it's a rare action
-        // but we could also implement it natively later.
-        let set_cmd = if target_type == "sink" {
-            "set-default-sink"
-        } else {
-            "set-default-source"
-        };
-
-        // We need to find the "next" device.
-        // For simplicity, let's keep the CLI version for now or refactor later.
-        // The user asked for "step by step".
-
-        let list_cmd = if target_type == "sink" {
-            "sinks"
-        } else {
-            "sources"
-        };
-        let output = tokio::process::Command::new("pactl")
-            .args(["list", "short", list_cmd])
-            .output()
-            .await?;
-        let stdout = String::from_utf8_lossy(&output.stdout);
-
-        let devices: Vec<String> = stdout
-            .lines()
-            .filter_map(|l| {
-                let parts: Vec<&str> = l.split_whitespace().collect();
-                if parts.len() >= 2 {
-                    let name = parts[1].to_string();
-                    if target_type == "source" && name.contains(".monitor") {
-                        None
-                    } else {
-                        Some(name)
-                    }
-                } else {
-                    None
-                }
+    async fn change_volume(
+        &self,
+        state: &AppReceivers,
+        target_type: &str,
+        step: &str,
+        is_up: bool,
+    ) -> Result<()> {
+        let is_sink = target_type == "sink";
+        let step_val: u32 = step.parse().unwrap_or(5);
+        let _ = state
+            .audio_cmd_tx
+            .send(AudioCommand::ChangeVolume {
+                is_sink,
+                step_val,
+                is_up,
             })
-            .collect();
+            .await;
+        Ok(())
+    }
 
-        if devices.is_empty() {
-            return Ok(());
-        }
+    async fn toggle_mute(&self, state: &AppReceivers, target_type: &str) -> Result<()> {
+        let is_sink = target_type == "sink";
+        let _ = state
+            .audio_cmd_tx
+            .send(AudioCommand::ToggleMute { is_sink })
+            .await;
+        Ok(())
+    }
 
-        let info_output = tokio::process::Command::new("pactl")
-            .args(["info"])
-            .output()
-            .await?;
-        let info_stdout = String::from_utf8_lossy(&info_output.stdout);
-        let search_key = if target_type == "sink" {
-            "Default Sink:"
-        } else {
-            "Default Source:"
-        };
-        let current_dev = info_stdout
-            .lines()
-            .find(|l| l.contains(search_key))
-            .and_then(|l| l.split(':').nth(1))
-            .map(|s| s.trim())
-            .unwrap_or("");
-
-        let current_index = devices.iter().position(|d| d == current_dev).unwrap_or(0);
-        let next_index = (current_index + 1) % devices.len();
-        let next_dev = &devices[next_index];
-
-        tokio::process::Command::new("pactl")
-            .args([set_cmd, next_dev])
-            .status()
-            .await?;
+    async fn cycle_device(&self, state: &AppReceivers, target_type: &str) -> Result<()> {
+        let is_sink = target_type == "sink";
+        let _ = state
+            .audio_cmd_tx
+            .send(AudioCommand::CycleDevice { is_sink })
+            .await;
         Ok(())
     }
 }

@@ -3,17 +3,21 @@ use std::io::Write;
 use std::process::{Command, Stdio};
 
 pub fn show_menu(prompt: &str, items: &[String], menu_cmd: &str) -> Result<String> {
+    // Backward compatibility for {prompt}, but environment variable is safer
     let cmd_str = menu_cmd.replace("{prompt}", prompt);
     let mut child = Command::new("sh")
         .arg("-c")
         .arg(&cmd_str)
+        .env("FLUXO_PROMPT", prompt) // Safer shell injection
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
+        .stderr(Stdio::null()) // Suppress GTK/Wayland warnings from tools like wofi
         .spawn()
         .context("Failed to spawn menu command")?;
 
     if let Some(mut stdin) = child.stdin.take() {
-        let input = items.join("\n");
+        let mut input = items.join("\n");
+        input.push('\n'); // Ensure trailing newline for wofi/rofi
         stdin
             .write_all(input.as_bytes())
             .context("Failed to write to menu stdin")?;
@@ -31,6 +35,36 @@ pub fn show_menu(prompt: &str, items: &[String], menu_cmd: &str) -> Result<Strin
     }
 
     Ok(selected)
+}
+
+pub fn get_hyprland_socket(socket_name: &str) -> Result<std::path::PathBuf> {
+    let signature = std::env::var("HYPRLAND_INSTANCE_SIGNATURE")
+        .context("HYPRLAND_INSTANCE_SIGNATURE not set")?;
+
+    // Try XDG_RUNTIME_DIR first (usually /run/user/1000)
+    if let Ok(runtime_dir) = std::env::var("XDG_RUNTIME_DIR") {
+        let path = std::path::PathBuf::from(runtime_dir)
+            .join("hypr")
+            .join(&signature)
+            .join(socket_name);
+        if path.exists() {
+            return Ok(path);
+        }
+    }
+
+    // Fallback to /tmp
+    let path = std::path::PathBuf::from("/tmp/hypr")
+        .join(&signature)
+        .join(socket_name);
+
+    if path.exists() {
+        Ok(path)
+    } else {
+        Err(anyhow::anyhow!(
+            "Hyprland socket {} not found in runtime dir or /tmp",
+            socket_name
+        ))
+    }
 }
 
 use regex::Regex;

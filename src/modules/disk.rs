@@ -18,6 +18,13 @@ impl WaybarModule for DiskModule {
 
         let disks = state.disks.borrow().clone();
 
+        if disks.is_empty() {
+            return Ok(WaybarOutput {
+                text: "Disk Loading...".to_string(),
+                ..Default::default()
+            });
+        }
+
         for disk in &disks {
             if disk.mount_point == *mountpoint {
                 let total = disk.total_bytes as f64;

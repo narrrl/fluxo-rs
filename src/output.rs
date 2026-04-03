@@ -1,6 +1,6 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Default)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct WaybarOutput {
     pub text: String,
     #[serde(skip_serializing_if = "Option::is_none")]

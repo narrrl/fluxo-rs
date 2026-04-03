@@ -1,6 +1,7 @@
+use crate::output::WaybarOutput;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::{RwLock, watch};
+use tokio::sync::{RwLock, mpsc, watch};
 use tokio::time::Instant;
 
 #[derive(Clone)]
@@ -13,7 +14,13 @@ pub struct AppReceivers {
     pub disks: watch::Receiver<Vec<DiskInfo>>,
     pub bluetooth: watch::Receiver<BtState>,
     pub audio: watch::Receiver<AudioState>,
+    pub mpris: watch::Receiver<MprisState>,
+    pub backlight: watch::Receiver<BacklightState>,
+    pub keyboard: watch::Receiver<KeyboardState>,
+    pub dnd: watch::Receiver<DndState>,
     pub health: Arc<RwLock<HashMap<String, ModuleHealth>>>,
+    pub bt_force_poll: mpsc::Sender<()>,
+    pub audio_cmd_tx: mpsc::Sender<crate::modules::audio::AudioCommand>,
 }
 
 #[derive(Clone, Default)]
@@ -21,12 +28,15 @@ pub struct ModuleHealth {
     pub consecutive_failures: u32,
     pub last_failure: Option<Instant>,
     pub backoff_until: Option<Instant>,
+    pub last_successful_output: Option<WaybarOutput>,
 }
 
 #[derive(Default, Clone)]
 pub struct AudioState {
     pub sink: AudioDeviceInfo,
     pub source: AudioSourceInfo,
+    pub available_sinks: Vec<String>,
+    pub available_sources: Vec<String>,
 }
 
 #[derive(Default, Clone)]
@@ -35,6 +45,7 @@ pub struct AudioDeviceInfo {
     pub description: String,
     pub volume: u8,
     pub muted: bool,
+    pub channels: u8,
 }
 
 #[derive(Default, Clone)]
@@ -43,6 +54,7 @@ pub struct AudioSourceInfo {
     pub description: String,
     pub volume: u8,
     pub muted: bool,
+    pub channels: u8,
 }
 
 #[derive(Default, Clone)]
@@ -128,6 +140,31 @@ impl Default for GpuState {
     }
 }
 
+#[derive(Default, Clone)]
+pub struct DndState {
+    pub is_dnd: bool,
+}
+
+#[derive(Default, Clone)]
+pub struct KeyboardState {
+    pub layout: String,
+}
+
+#[derive(Default, Clone)]
+pub struct BacklightState {
+    pub percentage: u8,
+}
+
+#[derive(Default, Clone)]
+pub struct MprisState {
+    pub is_playing: bool,
+    pub is_paused: bool,
+    pub is_stopped: bool,
+    pub artist: String,
+    pub title: String,
+    pub album: String,
+}
+
 #[cfg(test)]
 pub struct MockState {
     pub receivers: AppReceivers,
@@ -140,6 +177,10 @@ pub struct MockState {
     _disks_tx: watch::Sender<Vec<DiskInfo>>,
     _bt_tx: watch::Sender<BtState>,
     _audio_tx: watch::Sender<AudioState>,
+    _mpris_tx: watch::Sender<MprisState>,
+    _backlight_tx: watch::Sender<BacklightState>,
+    _keyboard_tx: watch::Sender<KeyboardState>,
+    _dnd_tx: watch::Sender<DndState>,
 }
 
 #[cfg(test)]
@@ -153,6 +194,10 @@ pub struct AppState {
     pub disks: Vec<DiskInfo>,
     pub bluetooth: BtState,
     pub audio: AudioState,
+    pub mpris: MprisState,
+    pub backlight: BacklightState,
+    pub keyboard: KeyboardState,
+    pub dnd: DndState,
     pub health: HashMap<String, ModuleHealth>,
 }
 
@@ -166,6 +211,12 @@ pub fn mock_state(state: AppState) -> MockState {
     let (disks_tx, disks_rx) = watch::channel(state.disks);
     let (bt_tx, bt_rx) = watch::channel(state.bluetooth);
     let (audio_tx, audio_rx) = watch::channel(state.audio);
+    let (mpris_tx, mpris_rx) = watch::channel(state.mpris);
+    let (backlight_tx, backlight_rx) = watch::channel(state.backlight);
+    let (keyboard_tx, keyboard_rx) = watch::channel(state.keyboard);
+    let (dnd_tx, dnd_rx) = watch::channel(state.dnd);
+    let (bt_force_tx, _) = mpsc::channel(1);
+    let (audio_cmd_tx, _) = mpsc::channel(1);
 
     MockState {
         receivers: AppReceivers {
@@ -177,7 +228,13 @@ pub fn mock_state(state: AppState) -> MockState {
             disks: disks_rx,
             bluetooth: bt_rx,
             audio: audio_rx,
+            mpris: mpris_rx,
+            backlight: backlight_rx,
+            keyboard: keyboard_rx,
+            dnd: dnd_rx,
             health: Arc::new(RwLock::new(state.health)),
+            bt_force_poll: bt_force_tx,
+            audio_cmd_tx,
         },
         _net_tx: net_tx,
         _cpu_tx: cpu_tx,
@@ -187,5 +244,9 @@ pub fn mock_state(state: AppState) -> MockState {
         _disks_tx: disks_tx,
         _bt_tx: bt_tx,
         _audio_tx: audio_tx,
+        _mpris_tx: mpris_tx,
+        _backlight_tx: backlight_tx,
+        _keyboard_tx: keyboard_tx,
+        _dnd_tx: dnd_tx,
     }
 }

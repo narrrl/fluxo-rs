@@ -1,7 +1,7 @@
 # Fluxo configuration example
 
 [general]
-menu_command = "fuzzel --dmenu --prompt '{prompt}'"
+menu_command = "fuzzel --dmenu --prompt \"$FLUXO_PROMPT\""
 
 [network]
 format = "{interface} ({ip}):  {rx:>5.2} MB/s   {tx:>5.2} MB/s"
