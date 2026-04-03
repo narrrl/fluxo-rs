@@ -76,19 +76,15 @@ impl KeyboardDaemon {
             .args(["devices", "-j"])
             .output()
             .await
+            && let Ok(json) = serde_json::from_slice::<serde_json::Value>(&output.stdout)
+            && let Some(keyboards) = json.get("keyboards").and_then(|v| v.as_array())
+            && let Some(main_kb) = keyboards.last()
         {
-            if let Ok(json) = serde_json::from_slice::<serde_json::Value>(&output.stdout) {
-                if let Some(keyboards) = json.get("keyboards").and_then(|v| v.as_array()) {
-                    if let Some(main_kb) = keyboards.last() {
-                        // The last active one is usually the main one
-                        if let Some(layout) = main_kb.get("active_keymap").and_then(|v| v.as_str())
-                        {
-                            let _ = tx.send(KeyboardState {
-                                layout: layout.to_string(),
-                            });
-                        }
-                    }
-                }
+            // The last active one is usually the main one
+            if let Some(layout) = main_kb.get("active_keymap").and_then(|v| v.as_str()) {
+                let _ = tx.send(KeyboardState {
+                    layout: layout.to_string(),
+                });
             }
         }
 

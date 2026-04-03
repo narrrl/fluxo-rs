@@ -137,48 +137,40 @@ impl WaybarModule for BtModule {
         match action.as_str() {
             "connect" => {
                 if let Some(mac) = args.get(1) {
-                    if let Ok(session) = bluer::Session::new().await {
-                        if let Ok(adapter) = session.default_adapter().await {
-                            if let Ok(addr) = mac.parse::<bluer::Address>() {
-                                if let Ok(device) = adapter.device(addr) {
-                                    let _ = device.connect().await;
-                                }
-                            }
-                        }
+                    if let Ok(session) = bluer::Session::new().await
+                        && let Ok(adapter) = session.default_adapter().await
+                        && let Ok(addr) = mac.parse::<bluer::Address>()
+                        && let Ok(device) = adapter.device(addr)
+                    {
+                        let _ = device.connect().await;
                     }
                     trigger_robust_poll(state.clone());
                 }
                 return Ok(WaybarOutput::default());
             }
             "disconnect" if bt_state.connected => {
-                if let Ok(session) = bluer::Session::new().await {
-                    if let Ok(adapter) = session.default_adapter().await {
-                        if let Ok(addr) = bt_state.device_address.parse::<bluer::Address>() {
-                            if let Ok(device) = adapter.device(addr) {
-                                let _ = device.disconnect().await;
-                            }
-                        }
-                    }
+                if let Ok(session) = bluer::Session::new().await
+                    && let Ok(adapter) = session.default_adapter().await
+                    && let Ok(addr) = bt_state.device_address.parse::<bluer::Address>()
+                    && let Ok(device) = adapter.device(addr)
+                {
+                    let _ = device.disconnect().await;
                 }
                 trigger_robust_poll(state.clone());
                 return Ok(WaybarOutput::default());
             }
             "menu_data" => {
                 let mut devs = Vec::new();
-                if let Ok(session) = bluer::Session::new().await {
-                    if let Ok(adapter) = session.default_adapter().await {
-                        if let Ok(addresses) = adapter.device_addresses().await {
-                            for addr in addresses {
-                                if let Ok(device) = adapter.device(addr) {
-                                    if device.is_paired().await.unwrap_or(false) {
-                                        let alias = device
-                                            .alias()
-                                            .await
-                                            .unwrap_or_else(|_| addr.to_string());
-                                        devs.push(format!("{} ({})", alias, addr));
-                                    }
-                                }
-                            }
+                if let Ok(session) = bluer::Session::new().await
+                    && let Ok(adapter) = session.default_adapter().await
+                    && let Ok(addresses) = adapter.device_addresses().await
+                {
+                    for addr in addresses {
+                        if let Ok(device) = adapter.device(addr)
+                            && device.is_paired().await.unwrap_or(false)
+                        {
+                            let alias = device.alias().await.unwrap_or_else(|_| addr.to_string());
+                            devs.push(format!("{} ({})", alias, addr));
                         }
                     }
                 }

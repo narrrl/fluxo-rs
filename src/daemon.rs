@@ -114,10 +114,10 @@ pub async fn run_daemon(config_path: Option<PathBuf>) -> Result<()> {
         let (ev_tx, mut ev_rx) = mpsc::channel(1);
         let mut watcher = RecommendedWatcher::new(
             move |res: notify::Result<Event>| {
-                if let Ok(event) = res {
-                    if event.kind.is_modify() || event.kind.is_create() {
-                        let _ = ev_tx.blocking_send(());
-                    }
+                if let Ok(event) = res
+                    && (event.kind.is_modify() || event.kind.is_create())
+                {
+                    let _ = ev_tx.blocking_send(());
                 }
             },
             NotifyConfig::default(),

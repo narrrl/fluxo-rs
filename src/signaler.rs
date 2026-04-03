@@ -36,17 +36,17 @@ impl WaybarSignaler {
     }
 
     fn send_signal(&mut self, signal_num: i32) {
-        if let Some(last) = self.last_signal_sent.get(&signal_num) {
-            if last.elapsed() < Duration::from_millis(50) {
-                return;
-            }
+        if let Some(last) = self.last_signal_sent.get(&signal_num)
+            && last.elapsed() < Duration::from_millis(50)
+        {
+            return;
         }
 
         let mut valid_pid = false;
-        if let Some(pid) = self.cached_pid {
-            if kill(pid, None).is_ok() {
-                valid_pid = true;
-            }
+        if let Some(pid) = self.cached_pid
+            && kill(pid, None).is_ok()
+        {
+            valid_pid = true;
         }
 
         if !valid_pid {

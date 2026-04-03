@@ -89,12 +89,11 @@ impl DndDaemon {
                 let mut stream = props_proxy.receive_properties_changed().await?;
                 while let Some(signal) = stream.next().await {
                     let args = signal.args()?;
-                    if args.interface_name == "org.erikreider.swaync.control" {
-                        if let Some(val) = args.changed_properties.get("dnd") {
-                            if let Ok(is_dnd) = bool::try_from(val) {
-                                let _ = tx.send(DndState { is_dnd });
-                            }
-                        }
+                    if args.interface_name == "org.erikreider.swaync.control"
+                        && let Some(val) = args.changed_properties.get("dnd")
+                        && let Ok(is_dnd) = bool::try_from(val)
+                    {
+                        let _ = tx.send(DndState { is_dnd });
                     }
                 }
             }

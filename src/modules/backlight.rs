@@ -114,10 +114,10 @@ impl BacklightDaemon {
             let (ev_tx, ev_rx) = mpsc::channel();
             let mut watcher = RecommendedWatcher::new(
                 move |res: notify::Result<Event>| {
-                    if let Ok(event) = res {
-                        if event.kind.is_modify() {
-                            let _ = ev_tx.send(());
-                        }
+                    if let Ok(event) = res
+                        && event.kind.is_modify()
+                    {
+                        let _ = ev_tx.send(());
                     }
                 },
                 NotifyConfig::default(),

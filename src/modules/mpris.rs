@@ -156,15 +156,15 @@ impl MprisDaemon {
                             artist = a.to_string();
                         }
                     }
-                    if let Some(v) = metadata.get("xesam:title") {
-                        if let Ok(t) = <&str>::try_from(v) {
-                            title = t.to_string();
-                        }
+                    if let Some(v) = metadata.get("xesam:title")
+                        && let Ok(t) = <&str>::try_from(v)
+                    {
+                        title = t.to_string();
                     }
-                    if let Some(v) = metadata.get("xesam:album") {
-                        if let Ok(a) = <&str>::try_from(v) {
-                            album = a.to_string();
-                        }
+                    if let Some(v) = metadata.get("xesam:album")
+                        && let Ok(a) = <&str>::try_from(v)
+                    {
+                        album = a.to_string();
                     }
 
                     // Only send if changed
