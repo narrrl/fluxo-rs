@@ -20,10 +20,13 @@ impl WaybarModule for DndModule {
         let action = args.first().unwrap_or(&"show");
 
         if *action == "toggle" {
-            let connection = Connection::session().await.map_err(|e| crate::error::FluxoError::Module {
-                module: "dnd",
-                message: format!("DBus connection failed: {}", e),
-            })?;
+            let connection =
+                Connection::session()
+                    .await
+                    .map_err(|e| crate::error::FluxoError::Module {
+                        module: "dnd",
+                        message: format!("DBus connection failed: {}", e),
+                    })?;
 
             // Try toggling SwayNC
             if let Ok(proxy) = SwayncControlProxy::new(&connection).await {

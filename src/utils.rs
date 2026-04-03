@@ -70,42 +70,52 @@ pub fn get_hyprland_socket(socket_name: &str) -> Result<std::path::PathBuf> {
 use regex::Regex;
 use std::sync::LazyLock;
 
+pub fn classify_usage(value: f64, high: f64, max: f64) -> &'static str {
+    if value > max {
+        "max"
+    } else if value > high {
+        "high"
+    } else {
+        "normal"
+    }
+}
+
 pub enum TokenValue {
     Float(f64),
     Int(i64),
     String(String),
 }
 
+pub static TOKEN_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\{([a-zA-Z0-9_]+)(?::([<>\^])?(\d+)?(?:\.(\d+))?)?\}").unwrap());
+
 pub fn format_template<K>(template: &str, values: &[(K, TokenValue)]) -> String
 where
     K: AsRef<str>,
 {
-    static RE: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r"\{([a-zA-Z0-9_]+)(?::([<>\^])?(\d+)?(?:\.(\d+))?)?\}").unwrap()
-    });
+    TOKEN_RE
+        .replace_all(template, |caps: &regex::Captures| {
+            let name = &caps[1];
+            if let Some((_, val)) = values.iter().find(|(k, _)| k.as_ref() == name) {
+                let align = caps.get(2).map(|m| m.as_str()).unwrap_or(">");
+                let width = caps
+                    .get(3)
+                    .map(|m| m.as_str().parse::<usize>().unwrap_or(0))
+                    .unwrap_or(0);
+                let precision = caps
+                    .get(4)
+                    .map(|m| m.as_str().parse::<usize>().unwrap_or(0));
 
-    RE.replace_all(template, |caps: &regex::Captures| {
-        let name = &caps[1];
-        if let Some((_, val)) = values.iter().find(|(k, _)| k.as_ref() == name) {
-            let align = caps.get(2).map(|m| m.as_str()).unwrap_or(">");
-            let width = caps
-                .get(3)
-                .map(|m| m.as_str().parse::<usize>().unwrap_or(0))
-                .unwrap_or(0);
-            let precision = caps
-                .get(4)
-                .map(|m| m.as_str().parse::<usize>().unwrap_or(0));
-
-            match val {
-                TokenValue::Float(f) => format_float(*f, align, width, precision),
-                TokenValue::Int(i) => format_int(*i, align, width),
-                TokenValue::String(s) => format_str(s, align, width),
+                match val {
+                    TokenValue::Float(f) => format_float(*f, align, width, precision),
+                    TokenValue::Int(i) => format_int(*i, align, width),
+                    TokenValue::String(s) => format_str(s, align, width),
+                }
+            } else {
+                caps[0].to_string()
             }
-        } else {
-            caps[0].to_string()
-        }
-    })
-    .into_owned()
+        })
+        .into_owned()
 }
 
 fn format_float(f: f64, align: &str, width: usize, precision: Option<usize>) -> String {

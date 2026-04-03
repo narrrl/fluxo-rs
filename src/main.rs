@@ -1,9 +1,11 @@
 mod config;
 mod daemon;
 mod error;
+mod health;
 mod ipc;
 mod modules;
 mod output;
+mod registry;
 mod signaler;
 mod state;
 mod utils;
@@ -76,6 +78,7 @@ fn main() {
 
     if let Some(module) = &cli.module {
         // Special case for client-side Bluetooth menu which requires UI
+        #[cfg(feature = "mod-bt")]
         if module == "bt" && cli.args.first().map(|s| s.as_str()) == Some("menu") {
             let config = config::load_config(None);
             let mut items = Vec::new();

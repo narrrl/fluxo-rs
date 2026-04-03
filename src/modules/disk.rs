@@ -3,7 +3,7 @@ use crate::error::{FluxoError, Result};
 use crate::modules::WaybarModule;
 use crate::output::WaybarOutput;
 use crate::state::AppReceivers;
-use crate::utils::{TokenValue, format_template};
+use crate::utils::{TokenValue, classify_usage, format_template};
 
 pub struct DiskModule;
 
@@ -41,13 +41,7 @@ impl WaybarModule for DiskModule {
                     0.0
                 };
 
-                let class = if percentage > 95.0 {
-                    "max"
-                } else if percentage > 80.0 {
-                    "high"
-                } else {
-                    "normal"
-                };
+                let class = classify_usage(percentage, 80.0, 95.0);
 
                 let text = format_template(
                     &config.disk.format,

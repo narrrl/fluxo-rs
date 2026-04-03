@@ -1,8 +1,6 @@
-use regex::Regex;
 use serde::Deserialize;
 use std::fs;
 use std::path::PathBuf;
-use std::sync::LazyLock;
 use tracing::{debug, info, warn};
 
 #[derive(Deserialize, Default, Clone)]
@@ -11,34 +9,49 @@ pub struct Config {
     pub general: GeneralConfig,
     #[serde(default)]
     pub signals: SignalsConfig,
+    #[cfg(feature = "mod-network")]
     #[serde(default)]
     pub network: NetworkConfig,
+    #[cfg(feature = "mod-hardware")]
     #[serde(default)]
     pub cpu: CpuConfig,
+    #[cfg(feature = "mod-hardware")]
     #[serde(default)]
     pub memory: MemoryConfig,
+    #[cfg(feature = "mod-hardware")]
     #[serde(default)]
     pub gpu: GpuConfig,
+    #[cfg(feature = "mod-hardware")]
     #[serde(default)]
     pub sys: SysConfig,
+    #[cfg(feature = "mod-hardware")]
     #[serde(default)]
     pub disk: DiskConfig,
+    #[cfg(feature = "mod-hardware")]
     #[serde(default)]
     pub pool: PoolConfig,
+    #[cfg(feature = "mod-hardware")]
     #[serde(default)]
     pub power: PowerConfig,
+    #[cfg(feature = "mod-audio")]
     #[serde(default)]
     pub audio: AudioConfig,
+    #[cfg(feature = "mod-bt")]
     #[serde(default)]
     pub bt: BtConfig,
+    #[cfg(feature = "mod-hardware")]
     #[serde(default)]
     pub game: GameConfig,
+    #[cfg(feature = "mod-dbus")]
     #[serde(default)]
     pub mpris: MprisConfig,
+    #[cfg(feature = "mod-dbus")]
     #[serde(default)]
     pub backlight: BacklightConfig,
+    #[cfg(feature = "mod-dbus")]
     #[serde(default)]
     pub keyboard: KeyboardConfig,
+    #[cfg(feature = "mod-dbus")]
     #[serde(default)]
     pub dnd: DndConfig,
 }
@@ -293,11 +306,8 @@ impl Default for DndConfig {
     }
 }
 
-static TOKEN_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\{([a-zA-Z0-9_]+)(?::([<>\^])?(\d+)?(?:\.(\d+))?)?\}").unwrap());
-
 fn extract_tokens(format_str: &str) -> Vec<String> {
-    TOKEN_RE
+    crate::utils::TOKEN_RE
         .captures_iter(format_str)
         .map(|cap| cap[1].to_string())
         .collect()
@@ -316,78 +326,93 @@ fn validate_format(label: &str, format_str: &str, known_tokens: &[&str]) {
 
 impl Config {
     pub fn validate(&self) {
+        #[cfg(feature = "mod-network")]
         validate_format(
             "network",
             &self.network.format,
             &["interface", "ip", "rx", "tx"],
         );
-        validate_format("cpu", &self.cpu.format, &["usage", "temp"]);
-        validate_format("memory", &self.memory.format, &["used", "total"]);
-        validate_format(
-            "gpu.amd",
-            &self.gpu.format_amd,
-            &["usage", "vram_used", "vram_total", "temp"],
-        );
-        validate_format("gpu.intel", &self.gpu.format_intel, &["usage", "freq"]);
-        validate_format(
-            "gpu.nvidia",
-            &self.gpu.format_nvidia,
-            &["usage", "vram_used", "vram_total", "temp"],
-        );
-        validate_format(
-            "sys",
-            &self.sys.format,
-            &["uptime", "load1", "load5", "load15", "procs"],
-        );
-        validate_format("disk", &self.disk.format, &["mount", "used", "total"]);
-        validate_format("pool", &self.pool.format, &["used", "total"]);
-        validate_format("power", &self.power.format, &["percentage", "icon"]);
-        validate_format(
-            "audio.sink_unmuted",
-            &self.audio.format_sink_unmuted,
-            &["name", "icon", "volume"],
-        );
-        validate_format(
-            "audio.sink_muted",
-            &self.audio.format_sink_muted,
-            &["name", "icon"],
-        );
-        validate_format(
-            "audio.source_unmuted",
-            &self.audio.format_source_unmuted,
-            &["name", "icon", "volume"],
-        );
-        validate_format(
-            "audio.source_muted",
-            &self.audio.format_source_muted,
-            &["name", "icon"],
-        );
-        validate_format("bt.connected", &self.bt.format_connected, &["alias"]);
-        validate_format(
-            "bt.plugin",
-            &self.bt.format_plugin,
-            &["alias", "left", "right", "anc", "mac"],
-        );
-        validate_format(
-            "mpris",
-            &self.mpris.format,
-            &["artist", "title", "album", "status_icon"],
-        );
-        validate_format("backlight", &self.backlight.format, &["percentage", "icon"]);
-        validate_format("keyboard", &self.keyboard.format, &["layout"]);
+        #[cfg(feature = "mod-hardware")]
+        {
+            validate_format("cpu", &self.cpu.format, &["usage", "temp"]);
+            validate_format("memory", &self.memory.format, &["used", "total"]);
+            validate_format(
+                "gpu.amd",
+                &self.gpu.format_amd,
+                &["usage", "vram_used", "vram_total", "temp"],
+            );
+            validate_format("gpu.intel", &self.gpu.format_intel, &["usage", "freq"]);
+            validate_format(
+                "gpu.nvidia",
+                &self.gpu.format_nvidia,
+                &["usage", "vram_used", "vram_total", "temp"],
+            );
+            validate_format(
+                "sys",
+                &self.sys.format,
+                &["uptime", "load1", "load5", "load15", "procs"],
+            );
+            validate_format("disk", &self.disk.format, &["mount", "used", "total"]);
+            validate_format("pool", &self.pool.format, &["used", "total"]);
+            validate_format("power", &self.power.format, &["percentage", "icon"]);
+        }
+        #[cfg(feature = "mod-audio")]
+        {
+            validate_format(
+                "audio.sink_unmuted",
+                &self.audio.format_sink_unmuted,
+                &["name", "icon", "volume"],
+            );
+            validate_format(
+                "audio.sink_muted",
+                &self.audio.format_sink_muted,
+                &["name", "icon"],
+            );
+            validate_format(
+                "audio.source_unmuted",
+                &self.audio.format_source_unmuted,
+                &["name", "icon", "volume"],
+            );
+            validate_format(
+                "audio.source_muted",
+                &self.audio.format_source_muted,
+                &["name", "icon"],
+            );
+        }
+        #[cfg(feature = "mod-bt")]
+        {
+            validate_format("bt.connected", &self.bt.format_connected, &["alias"]);
+            validate_format(
+                "bt.plugin",
+                &self.bt.format_plugin,
+                &["alias", "left", "right", "anc", "mac"],
+            );
+        }
+        #[cfg(feature = "mod-dbus")]
+        {
+            validate_format(
+                "mpris",
+                &self.mpris.format,
+                &["artist", "title", "album", "status_icon"],
+            );
+            validate_format("backlight", &self.backlight.format, &["percentage", "icon"]);
+            validate_format("keyboard", &self.keyboard.format, &["layout"]);
+        }
     }
 }
 
+pub fn default_config_path() -> PathBuf {
+    let config_dir = std::env::var("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| {
+            let home = std::env::var("HOME").unwrap_or_else(|_| String::from("/"));
+            PathBuf::from(home).join(".config")
+        });
+    config_dir.join("fluxo/config.toml")
+}
+
 pub fn load_config(custom_path: Option<PathBuf>) -> Config {
-    let config_path = custom_path.unwrap_or_else(|| {
-        let config_dir = std::env::var("XDG_CONFIG_HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| {
-                let home = std::env::var("HOME").unwrap_or_else(|_| String::from("/"));
-                PathBuf::from(home).join(".config")
-            });
-        config_dir.join("fluxo/config.toml")
-    });
+    let config_path = custom_path.unwrap_or_else(default_config_path);
 
     if let Ok(content) = fs::read_to_string(&config_path) {
         match toml::from_str::<Config>(&content) {

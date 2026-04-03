@@ -3,10 +3,19 @@ name = "fluxo-rs"
 version = "0.4.0"
 edition = "2024"
 
+[features]
+default = ["mod-audio", "mod-bt", "mod-network", "mod-hardware", "mod-dbus"]
+mod-audio = ["dep:libpulse-binding"]
+mod-bt = ["dep:bluer", "dep:maestro"]
+mod-network = ["dep:nix"]
+mod-hardware = []
+mod-dbus = ["dep:zbus", "dep:futures"]
+
 [dependencies]
 anyhow = "1.0.102"
 clap = { version = "4.6.0", features = ["derive"] }
 ctrlc = "3"
+libc = "0.2"
 regex = "1.12"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
@@ -15,16 +24,17 @@ thiserror = "2.0"
 toml = "1.1.2"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
-maestro = { git = "https://github.com/qzed/pbpctrl", package = "maestro" }
-bluer = { version = "0.17", features = ["bluetoothd", "rfcomm", "id"] }
-tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "time", "macros", "signal", "process"] }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "time", "macros", "signal", "process", "io-util", "net"] }
 tokio-util = { version = "0.7", features = ["codec", "time"] }
-futures = "0.3"
-libpulse-binding = "2.30"
-nix = { version = "0.31", features = ["net"] }
 notify = "8.2.0"
-zbus = "4"
+
+# Optional module dependencies
+maestro = { git = "https://github.com/qzed/pbpctrl", package = "maestro", optional = true }
+bluer = { version = "0.17", features = ["bluetoothd", "rfcomm", "id"], optional = true }
+futures = { version = "0.3", optional = true }
+libpulse-binding = { version = "2.30", optional = true }
+nix = { version = "0.31", features = ["net"], optional = true }
+zbus = { version = "5", optional = true }
 
 [dev-dependencies]
-
 tempfile = "3"

@@ -6,20 +6,34 @@ use tokio::time::Instant;
 
 #[derive(Clone)]
 pub struct AppReceivers {
+    #[cfg(feature = "mod-network")]
     pub network: watch::Receiver<NetworkState>,
+    #[cfg(feature = "mod-hardware")]
     pub cpu: watch::Receiver<CpuState>,
+    #[cfg(feature = "mod-hardware")]
     pub memory: watch::Receiver<MemoryState>,
+    #[cfg(feature = "mod-hardware")]
     pub sys: watch::Receiver<SysState>,
+    #[cfg(feature = "mod-hardware")]
     pub gpu: watch::Receiver<GpuState>,
+    #[cfg(feature = "mod-hardware")]
     pub disks: watch::Receiver<Vec<DiskInfo>>,
+    #[cfg(feature = "mod-bt")]
     pub bluetooth: watch::Receiver<BtState>,
+    #[cfg(feature = "mod-audio")]
     pub audio: watch::Receiver<AudioState>,
+    #[cfg(feature = "mod-dbus")]
     pub mpris: watch::Receiver<MprisState>,
+    #[cfg(feature = "mod-dbus")]
     pub backlight: watch::Receiver<BacklightState>,
+    #[cfg(feature = "mod-dbus")]
     pub keyboard: watch::Receiver<KeyboardState>,
+    #[cfg(feature = "mod-dbus")]
     pub dnd: watch::Receiver<DndState>,
     pub health: Arc<RwLock<HashMap<String, ModuleHealth>>>,
+    #[cfg(feature = "mod-bt")]
     pub bt_force_poll: mpsc::Sender<()>,
+    #[cfg(feature = "mod-audio")]
     pub audio_cmd_tx: mpsc::Sender<crate::modules::audio::AudioCommand>,
 }
 
@@ -168,85 +182,148 @@ pub struct MprisState {
 #[cfg(test)]
 pub struct MockState {
     pub receivers: AppReceivers,
-    // Keep senders alive so receivers don't return Closed errors
+    #[cfg(feature = "mod-network")]
     _net_tx: watch::Sender<NetworkState>,
+    #[cfg(feature = "mod-hardware")]
     _cpu_tx: watch::Sender<CpuState>,
+    #[cfg(feature = "mod-hardware")]
     _mem_tx: watch::Sender<MemoryState>,
+    #[cfg(feature = "mod-hardware")]
     _sys_tx: watch::Sender<SysState>,
+    #[cfg(feature = "mod-hardware")]
     _gpu_tx: watch::Sender<GpuState>,
+    #[cfg(feature = "mod-hardware")]
     _disks_tx: watch::Sender<Vec<DiskInfo>>,
+    #[cfg(feature = "mod-bt")]
     _bt_tx: watch::Sender<BtState>,
+    #[cfg(feature = "mod-audio")]
     _audio_tx: watch::Sender<AudioState>,
+    #[cfg(feature = "mod-dbus")]
     _mpris_tx: watch::Sender<MprisState>,
+    #[cfg(feature = "mod-dbus")]
     _backlight_tx: watch::Sender<BacklightState>,
+    #[cfg(feature = "mod-dbus")]
     _keyboard_tx: watch::Sender<KeyboardState>,
+    #[cfg(feature = "mod-dbus")]
     _dnd_tx: watch::Sender<DndState>,
 }
 
 #[cfg(test)]
 #[derive(Default, Clone)]
 pub struct AppState {
+    #[cfg(feature = "mod-network")]
     pub network: NetworkState,
+    #[cfg(feature = "mod-hardware")]
     pub cpu: CpuState,
+    #[cfg(feature = "mod-hardware")]
     pub memory: MemoryState,
+    #[cfg(feature = "mod-hardware")]
     pub sys: SysState,
+    #[cfg(feature = "mod-hardware")]
     pub gpu: GpuState,
+    #[cfg(feature = "mod-hardware")]
     pub disks: Vec<DiskInfo>,
+    #[cfg(feature = "mod-bt")]
     pub bluetooth: BtState,
+    #[cfg(feature = "mod-audio")]
     pub audio: AudioState,
+    #[cfg(feature = "mod-dbus")]
     pub mpris: MprisState,
+    #[cfg(feature = "mod-dbus")]
     pub backlight: BacklightState,
+    #[cfg(feature = "mod-dbus")]
     pub keyboard: KeyboardState,
+    #[cfg(feature = "mod-dbus")]
     pub dnd: DndState,
     pub health: HashMap<String, ModuleHealth>,
 }
 
 #[cfg(test)]
 pub fn mock_state(state: AppState) -> MockState {
+    #[cfg(feature = "mod-network")]
     let (net_tx, net_rx) = watch::channel(state.network);
+    #[cfg(feature = "mod-hardware")]
     let (cpu_tx, cpu_rx) = watch::channel(state.cpu);
+    #[cfg(feature = "mod-hardware")]
     let (mem_tx, mem_rx) = watch::channel(state.memory);
+    #[cfg(feature = "mod-hardware")]
     let (sys_tx, sys_rx) = watch::channel(state.sys);
+    #[cfg(feature = "mod-hardware")]
     let (gpu_tx, gpu_rx) = watch::channel(state.gpu);
+    #[cfg(feature = "mod-hardware")]
     let (disks_tx, disks_rx) = watch::channel(state.disks);
+    #[cfg(feature = "mod-bt")]
     let (bt_tx, bt_rx) = watch::channel(state.bluetooth);
+    #[cfg(feature = "mod-audio")]
     let (audio_tx, audio_rx) = watch::channel(state.audio);
+    #[cfg(feature = "mod-dbus")]
     let (mpris_tx, mpris_rx) = watch::channel(state.mpris);
+    #[cfg(feature = "mod-dbus")]
     let (backlight_tx, backlight_rx) = watch::channel(state.backlight);
+    #[cfg(feature = "mod-dbus")]
     let (keyboard_tx, keyboard_rx) = watch::channel(state.keyboard);
+    #[cfg(feature = "mod-dbus")]
     let (dnd_tx, dnd_rx) = watch::channel(state.dnd);
+    #[cfg(feature = "mod-bt")]
     let (bt_force_tx, _) = mpsc::channel(1);
+    #[cfg(feature = "mod-audio")]
     let (audio_cmd_tx, _) = mpsc::channel(1);
 
     MockState {
         receivers: AppReceivers {
+            #[cfg(feature = "mod-network")]
             network: net_rx,
+            #[cfg(feature = "mod-hardware")]
             cpu: cpu_rx,
+            #[cfg(feature = "mod-hardware")]
             memory: mem_rx,
+            #[cfg(feature = "mod-hardware")]
             sys: sys_rx,
+            #[cfg(feature = "mod-hardware")]
             gpu: gpu_rx,
+            #[cfg(feature = "mod-hardware")]
             disks: disks_rx,
+            #[cfg(feature = "mod-bt")]
             bluetooth: bt_rx,
+            #[cfg(feature = "mod-audio")]
             audio: audio_rx,
+            #[cfg(feature = "mod-dbus")]
             mpris: mpris_rx,
+            #[cfg(feature = "mod-dbus")]
             backlight: backlight_rx,
+            #[cfg(feature = "mod-dbus")]
             keyboard: keyboard_rx,
+            #[cfg(feature = "mod-dbus")]
             dnd: dnd_rx,
             health: Arc::new(RwLock::new(state.health)),
+            #[cfg(feature = "mod-bt")]
             bt_force_poll: bt_force_tx,
+            #[cfg(feature = "mod-audio")]
             audio_cmd_tx,
         },
+        #[cfg(feature = "mod-network")]
         _net_tx: net_tx,
+        #[cfg(feature = "mod-hardware")]
         _cpu_tx: cpu_tx,
+        #[cfg(feature = "mod-hardware")]
         _mem_tx: mem_tx,
+        #[cfg(feature = "mod-hardware")]
         _sys_tx: sys_tx,
+        #[cfg(feature = "mod-hardware")]
         _gpu_tx: gpu_tx,
+        #[cfg(feature = "mod-hardware")]
         _disks_tx: disks_tx,
+        #[cfg(feature = "mod-bt")]
         _bt_tx: bt_tx,
+        #[cfg(feature = "mod-audio")]
         _audio_tx: audio_tx,
+        #[cfg(feature = "mod-dbus")]
         _mpris_tx: mpris_tx,
+        #[cfg(feature = "mod-dbus")]
         _backlight_tx: backlight_tx,
+        #[cfg(feature = "mod-dbus")]
         _keyboard_tx: keyboard_tx,
+        #[cfg(feature = "mod-dbus")]
         _dnd_tx: dnd_tx,
     }
 }

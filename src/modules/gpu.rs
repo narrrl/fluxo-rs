@@ -3,7 +3,7 @@ use crate::error::Result;
 use crate::modules::WaybarModule;
 use crate::output::WaybarOutput;
 use crate::state::AppReceivers;
-use crate::utils::{TokenValue, format_template};
+use crate::utils::{TokenValue, classify_usage, format_template};
 
 pub struct GpuModule;
 
@@ -36,13 +36,7 @@ impl WaybarModule for GpuModule {
             });
         }
 
-        let class = if usage > 95.0 {
-            "max"
-        } else if usage > 75.0 {
-            "high"
-        } else {
-            "normal"
-        };
+        let class = classify_usage(usage, 75.0, 95.0);
 
         let format_str = match vendor.as_str() {
             "Intel" => &config.gpu.format_intel,
