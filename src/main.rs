@@ -19,6 +19,8 @@ use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 struct Cli {
     #[command(subcommand)]
     command: Commands,
+    #[arg(short='l', long="log-level", default_value="info")]
+    log_level: tracing::Level,
 }
 
 #[derive(Subcommand)]
@@ -79,12 +81,12 @@ enum Commands {
 }
 
 fn main() {
+    let cli = Cli::parse();
+
     tracing_subscriber::registry()
         .with(fmt::layer().with_target(false).pretty())
-        .with(EnvFilter::from_default_env().add_directive(tracing::Level::INFO.into()))
+        .with(EnvFilter::from_default_env().add_directive(cli.log_level.into()))
         .init();
-
-    let cli = Cli::parse();
 
     match &cli.command {
         Commands::Daemon { config } => {
