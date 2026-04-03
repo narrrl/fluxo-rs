@@ -3,8 +3,6 @@ use crate::error::Result;
 use crate::modules::WaybarModule;
 use crate::output::WaybarOutput;
 use crate::state::AppReceivers;
-use anyhow::anyhow;
-use std::env;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::UnixStream;
 
@@ -41,9 +39,7 @@ impl WaybarModule for GameModule {
 }
 
 async fn hyprland_ipc(cmd: &str) -> Result<String> {
-    let signature = env::var("HYPRLAND_INSTANCE_SIGNATURE")
-        .map_err(|_| anyhow!("HYPRLAND_INSTANCE_SIGNATURE not set"))?;
-    let path = format!("/tmp/hypr/{}/.socket.sock", signature);
+    let path = crate::utils::get_hyprland_socket(".socket.sock")?;
 
     let mut stream = UnixStream::connect(path).await?;
     stream.write_all(cmd.as_bytes()).await?;

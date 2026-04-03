@@ -10,6 +10,8 @@ pub struct Config {
     #[serde(default)]
     pub general: GeneralConfig,
     #[serde(default)]
+    pub signals: SignalsConfig,
+    #[serde(default)]
     pub network: NetworkConfig,
     #[serde(default)]
     pub cpu: CpuConfig,
@@ -31,6 +33,14 @@ pub struct Config {
     pub bt: BtConfig,
     #[serde(default)]
     pub game: GameConfig,
+    #[serde(default)]
+    pub mpris: MprisConfig,
+    #[serde(default)]
+    pub backlight: BacklightConfig,
+    #[serde(default)]
+    pub keyboard: KeyboardConfig,
+    #[serde(default)]
+    pub dnd: DndConfig,
 }
 
 #[derive(Deserialize, Clone)]
@@ -41,9 +51,29 @@ pub struct GeneralConfig {
 impl Default for GeneralConfig {
     fn default() -> Self {
         Self {
-            menu_command: "fuzzel --dmenu --prompt '{prompt}'".to_string(),
+            menu_command: "fuzzel --dmenu --prompt \"$FLUXO_PROMPT\"".to_string(),
         }
     }
+}
+
+#[allow(dead_code)]
+#[derive(Deserialize, Default, Clone)]
+pub struct SignalsConfig {
+    pub network: Option<i32>,
+    pub cpu: Option<i32>,
+    pub memory: Option<i32>,
+    pub gpu: Option<i32>,
+    pub sys: Option<i32>,
+    pub disk: Option<i32>,
+    pub pool: Option<i32>,
+    pub power: Option<i32>,
+    pub audio: Option<i32>,
+    pub bt: Option<i32>,
+    pub game: Option<i32>,
+    pub mpris: Option<i32>,
+    pub backlight: Option<i32>,
+    pub keyboard: Option<i32>,
+    pub dnd: Option<i32>,
 }
 
 #[derive(Deserialize, Clone)]
@@ -209,6 +239,60 @@ impl Default for GameConfig {
     }
 }
 
+#[derive(Deserialize, Clone)]
+pub struct MprisConfig {
+    pub format: String,
+}
+
+impl Default for MprisConfig {
+    fn default() -> Self {
+        Self {
+            format: "{status_icon} {artist} - {title}".to_string(),
+        }
+    }
+}
+
+#[derive(Deserialize, Clone)]
+pub struct BacklightConfig {
+    pub format: String,
+}
+
+impl Default for BacklightConfig {
+    fn default() -> Self {
+        Self {
+            format: "{percentage:>3}% {icon}".to_string(),
+        }
+    }
+}
+
+#[derive(Deserialize, Clone)]
+pub struct KeyboardConfig {
+    pub format: String,
+}
+
+impl Default for KeyboardConfig {
+    fn default() -> Self {
+        Self {
+            format: "{layout}".to_string(),
+        }
+    }
+}
+
+#[derive(Deserialize, Clone)]
+pub struct DndConfig {
+    pub format_dnd: String,
+    pub format_normal: String,
+}
+
+impl Default for DndConfig {
+    fn default() -> Self {
+        Self {
+            format_dnd: "<span size='large'>󰂛</span>".to_string(),
+            format_normal: "<span size='large'>󰂚</span>".to_string(),
+        }
+    }
+}
+
 static TOKEN_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\{([a-zA-Z0-9_]+)(?::([<>\^])?(\d+)?(?:\.(\d+))?)?\}").unwrap());
 
@@ -284,6 +368,13 @@ impl Config {
             &self.bt.format_plugin,
             &["alias", "left", "right", "anc", "mac"],
         );
+        validate_format(
+            "mpris",
+            &self.mpris.format,
+            &["artist", "title", "album", "status_icon"],
+        );
+        validate_format("backlight", &self.backlight.format, &["percentage", "icon"]);
+        validate_format("keyboard", &self.keyboard.format, &["layout"]);
     }
 }
 
@@ -330,7 +421,7 @@ mod tests {
         let config = Config::default();
         assert_eq!(
             config.general.menu_command,
-            "fuzzel --dmenu --prompt '{prompt}'"
+            "fuzzel --dmenu --prompt \"$FLUXO_PROMPT\""
         );
         assert!(config.cpu.format.contains("usage"));
         assert!(config.cpu.format.contains("temp"));
@@ -344,7 +435,7 @@ mod tests {
         // Should fallback to defaults without panicking
         assert_eq!(
             config.general.menu_command,
-            "fuzzel --dmenu --prompt '{prompt}'"
+            "fuzzel --dmenu --prompt \"$FLUXO_PROMPT\""
         );
     }
 
@@ -371,7 +462,7 @@ mod tests {
         // Should fallback to defaults
         assert_eq!(
             config.general.menu_command,
-            "fuzzel --dmenu --prompt '{prompt}'"
+            "fuzzel --dmenu --prompt \"$FLUXO_PROMPT\""
         );
     }
 
@@ -383,7 +474,7 @@ mod tests {
         let config = load_config(Some(tmpfile.path().to_path_buf()));
         assert_eq!(
             config.general.menu_command,
-            "fuzzel --dmenu --prompt '{prompt}'"
+            "fuzzel --dmenu --prompt \"$FLUXO_PROMPT\""
         );
         assert!(config.cpu.format.contains("usage"));
     }

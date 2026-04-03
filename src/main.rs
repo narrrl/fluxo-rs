@@ -4,6 +4,7 @@ mod error;
 mod ipc;
 mod modules;
 mod output;
+mod signaler;
 mod state;
 mod utils;
 
@@ -18,7 +19,14 @@ use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 #[command(about = "A high-performance daemon/client for Waybar custom modules", long_about = None)]
 struct Cli {
     #[command(subcommand)]
-    command: Commands,
+    command: Option<Commands>,
+
+    /// Module name to query or interact with
+    module: Option<String>,
+
+    /// Arguments to pass to the module
+    #[arg(trailing_var_arg = true)]
+    args: Vec<String>,
 }
 
 #[derive(Subcommand)]
@@ -31,51 +39,6 @@ enum Commands {
     },
     /// Reload the daemon configuration
     Reload,
-    /// Network speed module
-    #[command(alias = "network")]
-    Net,
-    /// CPU usage and temp module
-    Cpu,
-    /// Memory usage module
-    #[command(alias = "memory")]
-    Mem,
-    /// Disk usage module (path defaults to /)
-    Disk {
-        #[arg(default_value = "/")]
-        path: String,
-    },
-    /// Storage pool aggregate module (e.g., btrfs)
-    #[command(alias = "btrfs")]
-    Pool {
-        #[arg(default_value = "btrfs")]
-        kind: String,
-    },
-    /// Audio volume (sink) control
-    Vol {
-        /// Cycle to the next available output device
-        #[arg(short, long)]
-        cycle: bool,
-    },
-    /// Microphone (source) control
-    Mic {
-        /// Cycle to the next available input device
-        #[arg(short, long)]
-        cycle: bool,
-    },
-    /// GPU usage, VRAM, and temp module
-    Gpu,
-    /// System load average and uptime
-    Sys,
-    /// Bluetooth audio device status
-    #[command(alias = "bluetooth")]
-    Bt {
-        #[arg(default_value = "show")]
-        action: String,
-    },
-    /// System power and battery status
-    Power,
-    /// Hyprland gamemode status
-    Game,
 }
 
 fn main() {
@@ -86,114 +49,108 @@ fn main() {
 
     let cli = Cli::parse();
 
-    match &cli.command {
-        Commands::Daemon { config } => {
-            info!("Starting Fluxo daemon...");
-            let rt = tokio::runtime::Builder::new_multi_thread()
-                .enable_all()
-                .build()
-                .unwrap();
+    if let Some(command) = &cli.command {
+        match command {
+            Commands::Daemon { config } => {
+                info!("Starting Fluxo daemon...");
+                let rt = tokio::runtime::Builder::new_multi_thread()
+                    .enable_all()
+                    .build()
+                    .unwrap();
 
-            if let Err(e) = rt.block_on(daemon::run_daemon(config.clone())) {
-                error!("Daemon failed: {}", e);
-                process::exit(1);
+                if let Err(e) = rt.block_on(daemon::run_daemon(config.clone())) {
+                    error!("Daemon failed: {}", e);
+                    process::exit(1);
+                }
             }
+            Commands::Reload => match ipc::request_data("reload", &[]) {
+                Ok(_) => info!("Reload signal sent to daemon"),
+                Err(e) => {
+                    error!("Failed to send reload signal: {}", e);
+                    process::exit(1);
+                }
+            },
         }
-        Commands::Reload => match ipc::request_data("reload", &[]) {
-            Ok(_) => info!("Reload signal sent to daemon"),
-            Err(e) => {
-                error!("Failed to send reload signal: {}", e);
-                process::exit(1);
+        return;
+    }
+
+    if let Some(module) = &cli.module {
+        // Special case for client-side Bluetooth menu which requires UI
+        if module == "bt" && cli.args.first().map(|s| s.as_str()) == Some("menu") {
+            let config = config::load_config(None);
+            let mut items = Vec::new();
+
+            if let Ok(json_str) = ipc::request_data("bt", &["get_modes"])
+                && let Ok(val) = serde_json::from_str::<serde_json::Value>(&json_str)
+                && let Some(modes_str) = val.get("text").and_then(|t| t.as_str())
+                && !modes_str.is_empty()
+            {
+                for mode in modes_str.lines() {
+                    items.push(format!("Mode: {}", mode));
+                }
             }
-        },
-        Commands::Net => handle_ipc_response(ipc::request_data("net", &[])),
-        Commands::Cpu => handle_ipc_response(ipc::request_data("cpu", &[])),
-        Commands::Mem => handle_ipc_response(ipc::request_data("mem", &[])),
-        Commands::Disk { path } => handle_ipc_response(ipc::request_data("disk", &[path])),
-        Commands::Pool { kind } => handle_ipc_response(ipc::request_data("pool", &[kind])),
-        Commands::Vol { cycle } => {
-            let action = if *cycle { "cycle" } else { "show" };
-            handle_ipc_response(ipc::request_data("vol", &[action]));
-        }
-        Commands::Mic { cycle } => {
-            let action = if *cycle { "cycle" } else { "show" };
-            handle_ipc_response(ipc::request_data("mic", &[action]));
-        }
-        Commands::Gpu => handle_ipc_response(ipc::request_data("gpu", &[])),
-        Commands::Sys => handle_ipc_response(ipc::request_data("sys", &[])),
-        Commands::Bt { action } => {
-            if action == "menu" {
-                // Client-side execution of the menu
-                let config = config::load_config(None);
 
-                let mut items = Vec::new();
+            if !items.is_empty() {
+                items.push("Disconnect".to_string());
+            }
 
-                // If connected, show plugin modes and disconnect
-                if let Ok(json_str) = ipc::request_data("bt", &["get_modes"])
-                    && let Ok(val) = serde_json::from_str::<serde_json::Value>(&json_str)
-                    && let Some(modes_str) = val.get("text").and_then(|t| t.as_str())
-                    && !modes_str.is_empty()
+            items.push("--- Connect Device ---".to_string());
+
+            if let Ok(json_str) = ipc::request_data("bt", &["menu_data"])
+                && let Ok(val) = serde_json::from_str::<serde_json::Value>(&json_str)
+                && let Some(devices_str) = val.get("text").and_then(|t| t.as_str())
+            {
+                for line in devices_str.lines() {
+                    if !line.is_empty() {
+                        items.push(line.to_string());
+                    }
+                }
+            }
+
+            if !items.is_empty() {
+                if let Ok(selected) =
+                    utils::show_menu("BT Menu: ", &items, &config.general.menu_command)
                 {
-                    for mode in modes_str.lines() {
-                        items.push(format!("Mode: {}", mode));
-                    }
-                }
-
-                if !items.is_empty() {
-                    items.push("Disconnect".to_string());
-                }
-
-                items.push("--- Connect Device ---".to_string());
-
-                let devices_out = match std::process::Command::new("bluetoothctl")
-                    .args(["devices"])
-                    .output()
-                {
-                    Ok(out) => out,
-                    Err(e) => {
-                        error!("bluetoothctl not found or failed: {}", e);
-                        return;
-                    }
-                };
-                let stdout = String::from_utf8_lossy(&devices_out.stdout);
-
-                for line in stdout.lines() {
-                    if line.starts_with("Device ") {
-                        let parts: Vec<&str> = line.splitn(3, ' ').collect();
-                        if parts.len() == 3 {
-                            items.push(format!("{} ({})", parts[2], parts[1]));
-                        }
-                    }
-                }
-
-                if !items.is_empty() {
-                    if let Ok(selected) =
-                        utils::show_menu("BT Menu: ", &items, &config.general.menu_command)
+                    if let Some(mode) = selected.strip_prefix("Mode: ") {
+                        handle_ipc_response(ipc::request_data("bt", &["set_mode", mode]));
+                    } else if selected == "Disconnect" {
+                        handle_ipc_response(ipc::request_data("bt", &["disconnect"]));
+                    } else if selected == "--- Connect Device ---" {
+                        // Do nothing
+                    } else if let Some(mac_start) = selected.rfind('(')
+                        && let Some(mac_end) = selected.rfind(')')
                     {
-                        if let Some(mode) = selected.strip_prefix("Mode: ") {
-                            handle_ipc_response(ipc::request_data("bt", &["set_mode", mode]));
-                        } else if selected == "Disconnect" {
-                            handle_ipc_response(ipc::request_data("bt", &["disconnect"]));
-                        } else if selected == "--- Connect Device ---" {
-                            // Do nothing
-                        } else if let Some(mac_start) = selected.rfind('(')
-                            && let Some(mac_end) = selected.rfind(')')
-                        {
-                            let mac = &selected[mac_start + 1..mac_end];
-                            let _ = std::process::Command::new("bluetoothctl")
-                                .args(["connect", mac])
-                                .status();
-                        }
+                        let mac = &selected[mac_start + 1..mac_end];
+                        handle_ipc_response(ipc::request_data("bt", &["connect", mac]));
                     }
-                } else {
-                    info!("No Bluetooth options found.");
                 }
-                return;
+            } else {
+                info!("No Bluetooth options found.");
             }
-            handle_ipc_response(ipc::request_data("bt", &[action]));
+            return;
         }
-        Commands::Power => handle_ipc_response(ipc::request_data("power", &[])),
-        Commands::Game => handle_ipc_response(ipc::request_data("game", &[])),
+
+        // Generic module dispatch
+        // To handle module-specific default targets like "vol up" -> "vol sink up" or "mic up" -> "vol source up"
+        // Wait, `daemon.rs` `evaluate_module_for_signaler` defaults `vol` to `sink show`.
+        // If we map `mic` to `["vol", "source"]` in `main.rs` instead of keeping `mic` in daemon:
+        let (actual_module, actual_args) = if module == "vol" {
+            let mut new_args = vec!["sink".to_string()];
+            new_args.extend(cli.args.clone());
+            ("vol".to_string(), new_args)
+        } else if module == "mic" {
+            let mut new_args = vec!["source".to_string()];
+            new_args.extend(cli.args.clone());
+            ("vol".to_string(), new_args)
+        } else {
+            (module.clone(), cli.args.clone())
+        };
+
+        let args_ref: Vec<&str> = actual_args.iter().map(|s| s.as_str()).collect();
+        handle_ipc_response(ipc::request_data(&actual_module, &args_ref));
+    } else {
+        println!("Please specify a module or command. See --help.");
+        process::exit(1);
     }
 }
 
