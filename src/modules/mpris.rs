@@ -109,9 +109,8 @@ impl MprisDaemon {
 
         info!("Connected to D-Bus for MPRIS monitoring");
 
-        // Simple poll loop for MPRIS since players can come and go, and tracking dynamically
-        // with pure signals across multiple dynamically spawned DBus names is complex.
-        // A robust hybrid approach: poll every 2s for active players, and update state.
+        // Periodically poll for the active player and update the MPRIS state.
+        // This avoids complex dynamic signal tracking across ephemeral player instances.
 
         let dbus_proxy = DBusProxy::new(&connection).await?;
 

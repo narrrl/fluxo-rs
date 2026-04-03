@@ -1,18 +1,16 @@
 # fluxo-rs
 
-fluxo-rs is a high-performance system metrics daemon and client designed specifically for Waybar. It replaces standard shell scripts with a compiled Rust binary that collects data via a background polling loop and serves it over a Unix socket.
+`fluxo-rs` is a high-performance system metrics daemon and client designed specifically for Waybar. It entirely replaces standard shell scripts with a compiled Rust binary that collects data via a background polling loop and serves it over a Unix socket. 
+
+With its **100% Native, Content-Based Event-Driven Architecture**, it consumes effectively 0% CPU while idle and signals Waybar to redraw *only* when the rendered UI text or icons physically change.
 
 ## Key Features
 
-- **Asynchronous Architecture**: Built on **Tokio**, the daemon handles concurrent IPC requests and background tasks with zero latency and minimal CPU overhead.
-- **Native Library Integrations**: 
-    - **Audio**: Direct `libpulse` integration for event-driven, instant volume and device updates.
-    - **Bluetooth**: Native `bluer` integration for robust device monitoring.
-    - **Pixel Buds Pro**: Custom native RPC implementation for real-time battery and ANC control.
-    - **Network**: Native `nix` and `/proc` inspection for high-speed interface monitoring.
-    - **Hyprland**: Direct IPC Unix socket communication for gamemode and animation status.
-- **Circuit Breaker (Failsafe)**: Automatically detects failing modules and enters a "Cool down" state to prevent resource waste and log spam.
-- **Multi-threaded Polling**: Decoupled subsystem threads ensure that a hang in one system (e.g., a slow GPU probe) never freezes your entire bar.
+- **100% Native Architecture**: Zero shell-outs or subprocesses. Uses `bluer` for Bluetooth, `libpulse-binding` for audio, `zbus` for MPRIS/DND, and `notify` for backlight.
+- **Content-Based Event Signaling**: `fluxo-rs` evaluates your custom configuration formats internally. It only sends a `SIGRTMIN+X` signal to Waybar if the resulting string or CSS class has actually changed, eliminating pointless re-renders from raw polling fluctuations.
+- **Zero-Latency Interactions**: Direct library bindings mean that when you change your volume or connect a Bluetooth device via the CLI, the daemon updates instantly.
+- **Circuit Breaker (Failsafe)**: Automatically detects failing modules and enters a "Cool down" state, preventing resource waste and log spam. Fallback caching keeps your bar looking clean even during brief failures.
+- **Multi-threaded Polling**: Decoupled Tokio subsystem threads ensure that a hang in one system (e.g., a slow GPU probe) never freezes your Waybar.
 
 ## Modules
 
@@ -24,37 +22,47 @@ fluxo-rs is a high-performance system metrics daemon and client designed specifi
 | `sys` | System load and uptime | `{uptime}`, `{load1}`, `{load5}`, `{load15}`, `{procs}` |
 | `disk` | Disk usage | `{mount}`, `{used}`, `{total}` |
 | `pool` | Btrfs aggregate storage | `{used}`, `{total}` |
+| `gpu` | GPU usage & thermals | `{usage}`, `{vram_used}`, `{vram_total}`, `{temp}` |
 | `vol` | Audio output (sink) | `{name}`, `{volume}`, `{icon}` |
 | `mic` | Audio input (source) | `{name}`, `{volume}`, `{icon}` |
 | `bt` | Bluetooth status & plugins | `{alias}`, `{mac}`, `{left}`, `{right}`, `{anc}` |
 | `power` | Battery and AC status | `{percentage}`, `{icon}` |
-| `game` | Hyprland status | active/inactive icons |
+| `game` | Hyprland Gamemode status | active/inactive strings |
+| `mpris` | Media Player status | `{artist}`, `{title}`, `{album}`, `{status_icon}` |
+| `backlight` | Display Brightness | `{percentage}`, `{icon}` |
+| `kbd` | Keyboard Layout | `{layout}` |
+| `dnd` | Do Not Disturb (SwayNC) | active/inactive strings |
 
 ## Setup
 
 1. **Build**: `cargo build --release`
-2. **Configure**: Create `~/.config/fluxo/config.toml` (see `example.config.toml`).
-3. **Daemon**: Start `fluxo-rs daemon`. It's recommended to run this as a systemd user service.
+2. **Configure**: Create `~/.config/fluxo/config.toml` (see `example.config.toml`). Ensure you map your `[signals]`.
+3. **Daemon**: Start `fluxo-rs daemon`. It is highly recommended to run this as a systemd user service.
 
 ## Waybar Configuration
 
-To achieve zero-latency updates, use **Waybar Signals**:
+To achieve zero-latency updates and zero-polling CPU usage, set `interval: 0` on your modules and rely entirely on **Waybar Signals** mapped in your `config.toml`:
 
 ```jsonc
-"custom/audio": {
-    "exec": "fluxo vol",
+"custom/volume": {
+    "exec": "fluxo-rs vol",
     "return-type": "json",
-    "interval": 5,
-    "signal": 8,
-    "on-click": "fluxo audio cycle sink && pkill -RTMIN+8 waybar"
+    "interval": 0,
+    "signal": 8, // Must match the value in config.toml [signals]
+    "on-click": "fluxo-rs vol mute",
+    "on-scroll-up": "fluxo-rs vol up 1",
+    "on-scroll-down": "fluxo-rs vol down 1",
+    "on-click-right": "fluxo-rs vol cycle"
 },
-"custom/bluetooth": {
-    "exec": "fluxo bt",
+"custom/bluetooth-audio": {
+    "format": "{}",
     "return-type": "json",
-    "interval": 5,
+    "exec": "fluxo-rs bt",
+    "on-click": "fluxo-rs bt menu",
+    "on-click-right": "fluxo-rs bt cycle_mode",
     "signal": 9,
-    "on-click": "fluxo bt menu && pkill -RTMIN+9 waybar",
-    "on-click-right": "fluxo bt cycle_mode && pkill -RTMIN+9 waybar"
+    "interval": 0,
+    "tooltip": true
 }
 ```
 

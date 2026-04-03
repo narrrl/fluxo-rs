@@ -1,46 +1,97 @@
 # Fluxo configuration example
+# Place this at ~/.config/fluxo/config.toml
+
+# Note: All tokens support standard alignment, padding, and precision specifiers dynamically.
+# For example, you can change {rx:>5.2} to {rx:<8.1} or {used} to {used:^4.0} directly here.
 
 [general]
+# command used for interactive menus (e.g., bluetooth device selection)
+# $FLUXO_PROMPT is securely injected to prevent shell escaping issues
 menu_command = "fuzzel --dmenu --prompt \"$FLUXO_PROMPT\""
+# For Wofi use: menu_command = "wofi --show dmenu --prompt \"$FLUXO_PROMPT\""
+
+# Map modules to specific Waybar signals for zero-latency, event-driven UI updates.
+# These MUST match the `signal` configuration in your waybar config.jsonc
+[signals]
+network = 1
+cpu = 2
+memory = 3
+gpu = 4
+sys = 5
+disk = 6
+game = 7
+audio = 8
+bt = 9
+power = 10
+keyboard = 11
+mpris = 12
+backlight = 13
+dnd = 14
 
 [network]
-format = "{interface} ({ip}):  {rx:>5.2} MB/s   {tx:>5.2} MB/s"
+# tokens: {interface}, {ip}, {rx}, {tx}
+format = "{interface} ({ip}):  {rx:^4.1} MB/s   {tx:^4.1} MB/s"
 
 [cpu]
-format = "CPU: {usage:>4.1}% {temp:>4.1}C"
+# tokens: {usage}, {temp}, {model}
+format = "CPU: {usage:^4.1}% {temp:^4.1}C"
 
 [memory]
-format = "{used:>5.2}/{total:>5.2}GB"
+# tokens: {used}, {total}
+format = "MEM: {used:^4.1}/{total:^4.1}GB"
 
 [gpu]
+# tokens: {usage}, {vram_used}, {vram_total}, {temp}
 format_amd = "AMD: {usage:>3.0}% {vram_used:>4.1}/{vram_total:>4.1}GB {temp:>4.1}C"
 format_intel = "iGPU: {usage:>3.0}%"
 format_nvidia = "NV: {usage:>3.0}% {vram_used:>4.1}/{vram_total:>4.1}GB {temp:>4.1}C"
 
 [sys]
-format = "UP: {uptime} | LOAD: {load1:>4.2} {load5:>4.2} {load15:>4.2}"
+# tokens: {uptime}, {load1}, {load5}, {load15}, {procs}
+format = "UP: {uptime} LOAD: {load1:^3.1} "
 
 [disk]
-format = "{mount} {used:>5.1}/{total:>5.1}G"
+# tokens: {mount}, {used}, {total}
+format = "{mount} {used:^3.0}/{total:^3.0}G"
 
 [pool]
+# tokens: {used}, {total}
 format = "{used:>4.0}G / {total:>4.0}G"
 
 [power]
+# tokens: {percentage}, {icon}
 format = "{percentage:>3}%  {icon}"
 
-[bt]
-format_connected = "{alias} 󰂰"
-format_plugin = "{alias} [{left}|{right}] {anc} 󰂰"
-format_disconnected = "󰂯"
-format_disabled = "󰂲 Off"
-
 [audio]
+# tokens: {name}, {volume}, {icon}
 format_sink_unmuted = "{name} {volume:>3}% {icon}"
 format_sink_muted = "{name} {icon}"
 format_source_unmuted = "{name} {volume:>3}% {icon}"
 format_source_muted = "{name} {icon}"
 
+[bt]
+# tokens: {alias}, {mac}, {left}, {right}, {anc}
+format_plugin = "{alias} [{left}|{right}] {anc} 󰂰"
+format_connected = "󰂰 {alias}"
+format_disconnected = "󰂯 Disconnected"
+format_disabled = "󰂲 Off"
+
 [game]
 format_active = "<span size='large'>󰊖</span>"
 format_inactive = "<span size='large'></span>"
+
+[mpris]
+# tokens: {artist}, {title}, {album}, {status_icon}
+format = "{status_icon} {artist} - {title}"
+
+[backlight]
+# tokens: {percentage}, {icon}
+format = "{percentage:>3}% {icon}"
+
+[keyboard]
+# tokens: {layout}
+format = "{layout}"
+
+[dnd]
+format_dnd = "<span size='large'>󰂛</span>"
+format_normal = "<span size='large'>󰂚</span>"

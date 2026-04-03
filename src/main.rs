@@ -131,9 +131,7 @@ fn main() {
         }
 
         // Generic module dispatch
-        // To handle module-specific default targets like "vol up" -> "vol sink up" or "mic up" -> "vol source up"
-        // Wait, `daemon.rs` `evaluate_module_for_signaler` defaults `vol` to `sink show`.
-        // If we map `mic` to `["vol", "source"]` in `main.rs` instead of keeping `mic` in daemon:
+        // Translate module-specific shorthand targets
         let (actual_module, actual_args) = if module == "vol" {
             let mut new_args = vec!["sink".to_string()];
             new_args.extend(cli.args.clone());
