@@ -15,8 +15,38 @@ impl WaybarModule for DndModule {
         &self,
         config: &Config,
         state: &AppReceivers,
-        _args: &[&str],
+        args: &[&str],
     ) -> Result<WaybarOutput> {
+        let action = args.first().unwrap_or(&"show");
+
+        if *action == "toggle" {
+            let connection = Connection::session().await.map_err(|e| crate::error::FluxoError::Module {
+                module: "dnd",
+                message: format!("DBus connection failed: {}", e),
+            })?;
+
+            // Try toggling SwayNC
+            if let Ok(proxy) = SwayncControlProxy::new(&connection).await {
+                if let Ok(is_dnd) = proxy.dnd().await {
+                    let _ = proxy.set_dnd(!is_dnd).await;
+                    return Ok(WaybarOutput::default());
+                }
+            }
+
+            // Try toggling Dunst
+            if let Ok(proxy) = DunstControlProxy::new(&connection).await {
+                if let Ok(is_paused) = proxy.paused().await {
+                    let _ = proxy.set_paused(!is_paused).await;
+                    return Ok(WaybarOutput::default());
+                }
+            }
+
+            return Err(crate::error::FluxoError::Module {
+                module: "dnd",
+                message: "No supported notification daemon found to toggle".to_string(),
+            });
+        }
+
         let is_dnd = state.dnd.borrow().is_dnd;
 
         if is_dnd {
@@ -47,6 +77,20 @@ pub struct DndDaemon;
 trait SwayncControl {
     #[zbus(property)]
     fn dnd(&self) -> zbus::Result<bool>;
+    #[zbus(property)]
+    fn set_dnd(&self, value: bool) -> zbus::Result<()>;
+}
+
+#[proxy(
+    interface = "org.dunstproject.cmd0",
+    default_service = "org.freedesktop.Notifications",
+    default_path = "/org/freedesktop/Notifications"
+)]
+trait DunstControl {
+    #[zbus(property)]
+    fn paused(&self) -> zbus::Result<bool>;
+    #[zbus(property)]
+    fn set_paused(&self, value: bool) -> zbus::Result<()>;
 }
 
 impl DndDaemon {
@@ -70,30 +114,53 @@ impl DndDaemon {
 
         info!("Connected to D-Bus for DND monitoring");
 
-        // Try SwayNC first
+        // Try SwayNC
         if let Ok(proxy) = SwayncControlProxy::new(&connection).await {
-            debug!("Found SwayNC, using it for DND state.");
-
-            // Get initial state
             if let Ok(is_dnd) = proxy.dnd().await {
+                debug!("Found SwayNC, using it for DND state.");
                 let _ = tx.send(DndState { is_dnd });
-            }
 
-            // Monitor properties changed
-            if let Ok(props_proxy) = PropertiesProxy::builder(&connection)
-                .destination("org.erikreider.swaync.control")?
-                .path("/org/erikreider/swaync/control")?
-                .build()
-                .await
-            {
-                let mut stream = props_proxy.receive_properties_changed().await?;
-                while let Some(signal) = stream.next().await {
-                    let args = signal.args()?;
-                    if args.interface_name == "org.erikreider.swaync.control"
-                        && let Some(val) = args.changed_properties.get("dnd")
-                        && let Ok(is_dnd) = bool::try_from(val)
-                    {
-                        let _ = tx.send(DndState { is_dnd });
+                if let Ok(props_proxy) = PropertiesProxy::builder(&connection)
+                    .destination("org.erikreider.swaync.control")?
+                    .path("/org/erikreider/swaync/control")?
+                    .build()
+                    .await
+                {
+                    let mut stream = props_proxy.receive_properties_changed().await?;
+                    while let Some(signal) = stream.next().await {
+                        let args = signal.args()?;
+                        if args.interface_name == "org.erikreider.swaync.control"
+                            && let Some(val) = args.changed_properties.get("dnd")
+                            && let Ok(is_dnd) = bool::try_from(val)
+                        {
+                            let _ = tx.send(DndState { is_dnd });
+                        }
+                    }
+                }
+            }
+        }
+
+        // Try Dunst
+        if let Ok(proxy) = DunstControlProxy::new(&connection).await {
+            if let Ok(is_dnd) = proxy.paused().await {
+                debug!("Found Dunst, using it for DND state.");
+                let _ = tx.send(DndState { is_dnd });
+
+                if let Ok(props_proxy) = PropertiesProxy::builder(&connection)
+                    .destination("org.freedesktop.Notifications")?
+                    .path("/org/freedesktop/Notifications")?
+                    .build()
+                    .await
+                {
+                    let mut stream = props_proxy.receive_properties_changed().await?;
+                    while let Some(signal) = stream.next().await {
+                        let args = signal.args()?;
+                        if args.interface_name == "org.dunstproject.cmd0"
+                            && let Some(val) = args.changed_properties.get("paused")
+                            && let Ok(is_dnd) = bool::try_from(val)
+                        {
+                            let _ = tx.send(DndState { is_dnd });
+                        }
                     }
                 }
             }

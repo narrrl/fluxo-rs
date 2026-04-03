@@ -121,7 +121,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_disk_not_found() {
-        let state = mock_state(AppState::default());
+        let state = state_with_disk("/", 100, 50);
         let config = Config::default();
         let result = DiskModule
             .run(&config, &state.receivers, &["/nonexistent"])
