@@ -29,19 +29,19 @@ impl WaybarModule for DndModule {
                     })?;
 
             // Try toggling SwayNC
-            if let Ok(proxy) = SwayncControlProxy::new(&connection).await {
-                if let Ok(is_dnd) = proxy.dnd().await {
-                    let _ = proxy.set_dnd(!is_dnd).await;
-                    return Ok(WaybarOutput::default());
-                }
+            if let Ok(proxy) = SwayncControlProxy::new(&connection).await
+                && let Ok(is_dnd) = proxy.dnd().await
+            {
+                let _ = proxy.set_dnd(!is_dnd).await;
+                return Ok(WaybarOutput::default());
             }
 
             // Try toggling Dunst
-            if let Ok(proxy) = DunstControlProxy::new(&connection).await {
-                if let Ok(is_paused) = proxy.paused().await {
-                    let _ = proxy.set_paused(!is_paused).await;
-                    return Ok(WaybarOutput::default());
-                }
+            if let Ok(proxy) = DunstControlProxy::new(&connection).await
+                && let Ok(is_paused) = proxy.paused().await
+            {
+                let _ = proxy.set_paused(!is_paused).await;
+                return Ok(WaybarOutput::default());
             }
 
             return Err(crate::error::FluxoError::Module {
@@ -118,52 +118,52 @@ impl DndDaemon {
         info!("Connected to D-Bus for DND monitoring");
 
         // Try SwayNC
-        if let Ok(proxy) = SwayncControlProxy::new(&connection).await {
-            if let Ok(is_dnd) = proxy.dnd().await {
-                debug!("Found SwayNC, using it for DND state.");
-                let _ = tx.send(DndState { is_dnd });
+        if let Ok(proxy) = SwayncControlProxy::new(&connection).await
+            && let Ok(is_dnd) = proxy.dnd().await
+        {
+            debug!("Found SwayNC, using it for DND state.");
+            let _ = tx.send(DndState { is_dnd });
 
-                if let Ok(props_proxy) = PropertiesProxy::builder(&connection)
-                    .destination("org.erikreider.swaync.control")?
-                    .path("/org/erikreider/swaync/control")?
-                    .build()
-                    .await
-                {
-                    let mut stream = props_proxy.receive_properties_changed().await?;
-                    while let Some(signal) = stream.next().await {
-                        let args = signal.args()?;
-                        if args.interface_name == "org.erikreider.swaync.control"
-                            && let Some(val) = args.changed_properties.get("dnd")
-                            && let Ok(is_dnd) = bool::try_from(val)
-                        {
-                            let _ = tx.send(DndState { is_dnd });
-                        }
+            if let Ok(props_proxy) = PropertiesProxy::builder(&connection)
+                .destination("org.erikreider.swaync.control")?
+                .path("/org/erikreider/swaync/control")?
+                .build()
+                .await
+            {
+                let mut stream = props_proxy.receive_properties_changed().await?;
+                while let Some(signal) = stream.next().await {
+                    let args = signal.args()?;
+                    if args.interface_name == "org.erikreider.swaync.control"
+                        && let Some(val) = args.changed_properties.get("dnd")
+                        && let Ok(is_dnd) = bool::try_from(val)
+                    {
+                        let _ = tx.send(DndState { is_dnd });
                     }
                 }
             }
         }
 
         // Try Dunst
-        if let Ok(proxy) = DunstControlProxy::new(&connection).await {
-            if let Ok(is_dnd) = proxy.paused().await {
-                debug!("Found Dunst, using it for DND state.");
-                let _ = tx.send(DndState { is_dnd });
+        if let Ok(proxy) = DunstControlProxy::new(&connection).await
+            && let Ok(is_dnd) = proxy.paused().await
+        {
+            debug!("Found Dunst, using it for DND state.");
+            let _ = tx.send(DndState { is_dnd });
 
-                if let Ok(props_proxy) = PropertiesProxy::builder(&connection)
-                    .destination("org.freedesktop.Notifications")?
-                    .path("/org/freedesktop/Notifications")?
-                    .build()
-                    .await
-                {
-                    let mut stream = props_proxy.receive_properties_changed().await?;
-                    while let Some(signal) = stream.next().await {
-                        let args = signal.args()?;
-                        if args.interface_name == "org.dunstproject.cmd0"
-                            && let Some(val) = args.changed_properties.get("paused")
-                            && let Ok(is_dnd) = bool::try_from(val)
-                        {
-                            let _ = tx.send(DndState { is_dnd });
-                        }
+            if let Ok(props_proxy) = PropertiesProxy::builder(&connection)
+                .destination("org.freedesktop.Notifications")?
+                .path("/org/freedesktop/Notifications")?
+                .build()
+                .await
+            {
+                let mut stream = props_proxy.receive_properties_changed().await?;
+                while let Some(signal) = stream.next().await {
+                    let args = signal.args()?;
+                    if args.interface_name == "org.dunstproject.cmd0"
+                        && let Some(val) = args.changed_properties.get("paused")
+                        && let Ok(is_dnd) = bool::try_from(val)
+                    {
+                        let _ = tx.send(DndState { is_dnd });
                     }
                 }
             }
