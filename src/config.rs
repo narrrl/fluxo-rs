@@ -91,12 +91,15 @@ pub struct SignalsConfig {
 
 #[derive(Deserialize, Clone)]
 pub struct NetworkConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
     pub format: String,
 }
 
 impl Default for NetworkConfig {
     fn default() -> Self {
         Self {
+            enabled: true,
             format: "{interface} ({ip}):  {rx:>5.2} MB/s   {tx:>5.2} MB/s".to_string(),
         }
     }
@@ -104,12 +107,15 @@ impl Default for NetworkConfig {
 
 #[derive(Deserialize, Clone)]
 pub struct CpuConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
     pub format: String,
 }
 
 impl Default for CpuConfig {
     fn default() -> Self {
         Self {
+            enabled: true,
             format: "CPU: {usage:>4.1}% {temp:>4.1}C".to_string(),
         }
     }
@@ -117,12 +123,15 @@ impl Default for CpuConfig {
 
 #[derive(Deserialize, Clone)]
 pub struct MemoryConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
     pub format: String,
 }
 
 impl Default for MemoryConfig {
     fn default() -> Self {
         Self {
+            enabled: true,
             format: "{used:>5.2}/{total:>5.2}GB".to_string(),
         }
     }
@@ -130,6 +139,8 @@ impl Default for MemoryConfig {
 
 #[derive(Deserialize, Clone)]
 pub struct GpuConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
     pub format_amd: String,
     pub format_intel: String,
     pub format_nvidia: String,
@@ -138,6 +149,7 @@ pub struct GpuConfig {
 impl Default for GpuConfig {
     fn default() -> Self {
         Self {
+            enabled: true,
             format_amd: "AMD: {usage:>3.0}% {vram_used:>4.1}/{vram_total:>4.1}GB {temp:>4.1}C"
                 .to_string(),
             format_intel: "iGPU: {usage:>3.0}%".to_string(),
@@ -149,12 +161,15 @@ impl Default for GpuConfig {
 
 #[derive(Deserialize, Clone)]
 pub struct SysConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
     pub format: String,
 }
 
 impl Default for SysConfig {
     fn default() -> Self {
         Self {
+            enabled: true,
             format: "UP: {uptime} | LOAD: {load1:>4.2} {load5:>4.2} {load15:>4.2}".to_string(),
         }
     }
@@ -162,12 +177,15 @@ impl Default for SysConfig {
 
 #[derive(Deserialize, Clone)]
 pub struct DiskConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
     pub format: String,
 }
 
 impl Default for DiskConfig {
     fn default() -> Self {
         Self {
+            enabled: true,
             format: "{mount} {used:>5.1}/{total:>5.1}G".to_string(),
         }
     }
@@ -175,12 +193,15 @@ impl Default for DiskConfig {
 
 #[derive(Deserialize, Clone)]
 pub struct PoolConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
     pub format: String,
 }
 
 impl Default for PoolConfig {
     fn default() -> Self {
         Self {
+            enabled: true,
             format: "{used:>4.0}G / {total:>4.0}G".to_string(),
         }
     }
@@ -188,12 +209,15 @@ impl Default for PoolConfig {
 
 #[derive(Deserialize, Clone)]
 pub struct PowerConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
     pub format: String,
 }
 
 impl Default for PowerConfig {
     fn default() -> Self {
         Self {
+            enabled: true,
             format: "{percentage:>3}%  {icon}".to_string(),
         }
     }
@@ -201,6 +225,8 @@ impl Default for PowerConfig {
 
 #[derive(Deserialize, Clone)]
 pub struct AudioConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
     pub format_sink_unmuted: String,
     pub format_sink_muted: String,
     pub format_source_unmuted: String,
@@ -210,6 +236,7 @@ pub struct AudioConfig {
 impl Default for AudioConfig {
     fn default() -> Self {
         Self {
+            enabled: true,
             format_sink_unmuted: "{name} {volume:>3}% {icon}".to_string(),
             format_sink_muted: "{name} {icon}".to_string(),
             format_source_unmuted: "{name} {volume:>3}% {icon}".to_string(),
@@ -220,6 +247,8 @@ impl Default for AudioConfig {
 
 #[derive(Deserialize, Clone)]
 pub struct BtConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
     pub format_connected: String,
     pub format_plugin: String,
     pub format_disconnected: String,
@@ -229,6 +258,7 @@ pub struct BtConfig {
 impl Default for BtConfig {
     fn default() -> Self {
         Self {
+            enabled: true,
             format_connected: "{alias} 󰂰".to_string(),
             format_plugin: "{alias} [{left}|{right}] {anc} 󰂰".to_string(),
             format_disconnected: "󰂯".to_string(),
@@ -239,6 +269,8 @@ impl Default for BtConfig {
 
 #[derive(Deserialize, Clone)]
 pub struct GameConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
     pub format_active: String,
     pub format_inactive: String,
 }
@@ -246,6 +278,7 @@ pub struct GameConfig {
 impl Default for GameConfig {
     fn default() -> Self {
         Self {
+            enabled: true,
             format_active: "<span size='large'>󰊖</span>".to_string(),
             format_inactive: "<span size='large'></span>".to_string(),
         }
@@ -254,12 +287,15 @@ impl Default for GameConfig {
 
 #[derive(Deserialize, Clone)]
 pub struct MprisConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
     pub format: String,
 }
 
 impl Default for MprisConfig {
     fn default() -> Self {
         Self {
+            enabled: true,
             format: "{status_icon} {artist} - {title}".to_string(),
         }
     }
@@ -267,12 +303,15 @@ impl Default for MprisConfig {
 
 #[derive(Deserialize, Clone)]
 pub struct BacklightConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
     pub format: String,
 }
 
 impl Default for BacklightConfig {
     fn default() -> Self {
         Self {
+            enabled: true,
             format: "{percentage:>3}% {icon}".to_string(),
         }
     }
@@ -280,12 +319,15 @@ impl Default for BacklightConfig {
 
 #[derive(Deserialize, Clone)]
 pub struct KeyboardConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
     pub format: String,
 }
 
 impl Default for KeyboardConfig {
     fn default() -> Self {
         Self {
+            enabled: true,
             format: "{layout}".to_string(),
         }
     }
@@ -293,13 +335,20 @@ impl Default for KeyboardConfig {
 
 #[derive(Deserialize, Clone)]
 pub struct DndConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
     pub format_dnd: String,
     pub format_normal: String,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl Default for DndConfig {
     fn default() -> Self {
         Self {
+            enabled: true,
             format_dnd: "<span size='large'>󰂛</span>".to_string(),
             format_normal: "<span size='large'>󰂚</span>".to_string(),
         }
@@ -325,6 +374,44 @@ fn validate_format(label: &str, format_str: &str, known_tokens: &[&str]) {
 }
 
 impl Config {
+    /// Check if a module is enabled in the configuration.
+    /// Returns false if the module is explicitly disabled; true if enabled or unknown.
+    pub fn is_module_enabled(&self, module_name: &str) -> bool {
+        match module_name {
+            #[cfg(feature = "mod-network")]
+            "net" | "network" => self.network.enabled,
+            #[cfg(feature = "mod-hardware")]
+            "cpu" => self.cpu.enabled,
+            #[cfg(feature = "mod-hardware")]
+            "mem" | "memory" => self.memory.enabled,
+            #[cfg(feature = "mod-hardware")]
+            "gpu" => self.gpu.enabled,
+            #[cfg(feature = "mod-hardware")]
+            "sys" => self.sys.enabled,
+            #[cfg(feature = "mod-hardware")]
+            "disk" => self.disk.enabled,
+            #[cfg(feature = "mod-hardware")]
+            "pool" | "btrfs" => self.pool.enabled,
+            #[cfg(feature = "mod-hardware")]
+            "power" => self.power.enabled,
+            #[cfg(feature = "mod-hardware")]
+            "game" => self.game.enabled,
+            #[cfg(feature = "mod-audio")]
+            "vol" | "audio" | "mic" => self.audio.enabled,
+            #[cfg(feature = "mod-bt")]
+            "bt" | "bluetooth" => self.bt.enabled,
+            #[cfg(feature = "mod-dbus")]
+            "mpris" => self.mpris.enabled,
+            #[cfg(feature = "mod-dbus")]
+            "backlight" => self.backlight.enabled,
+            #[cfg(feature = "mod-dbus")]
+            "kbd" | "keyboard" => self.keyboard.enabled,
+            #[cfg(feature = "mod-dbus")]
+            "dnd" => self.dnd.enabled,
+            _ => true,
+        }
+    }
+
     pub fn validate(&self) {
         #[cfg(feature = "mod-network")]
         validate_format(

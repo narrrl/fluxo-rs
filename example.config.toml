@@ -29,40 +29,49 @@ backlight = 13
 dnd = 14
 
 [network]
+# enabled = false  # set to false to disable this module at runtime
 # tokens: {interface}, {ip}, {rx}, {tx}
 format = "{interface} ({ip}):  {rx:^4.1} MB/s   {tx:^4.1} MB/s"
 
 [cpu]
+# enabled = false  # set to false to disable this module at runtime
 # tokens: {usage}, {temp}, {model}
 format = "CPU: {usage:^4.1}% {temp:^4.1}C"
 
 [memory]
+# enabled = false  # set to false to disable this module at runtime
 # tokens: {used}, {total}
 format = "MEM: {used:^4.1}/{total:^4.1}GB"
 
 [gpu]
+# enabled = false  # set to false to disable this module at runtime
 # tokens: {usage}, {vram_used}, {vram_total}, {temp}
 format_amd = "AMD: {usage:>3.0}% {vram_used:>4.1}/{vram_total:>4.1}GB {temp:>4.1}C"
 format_intel = "iGPU: {usage:>3.0}%"
 format_nvidia = "NV: {usage:>3.0}% {vram_used:>4.1}/{vram_total:>4.1}GB {temp:>4.1}C"
 
 [sys]
+# enabled = false  # set to false to disable this module at runtime
 # tokens: {uptime}, {load1}, {load5}, {load15}, {procs}
 format = "UP: {uptime} LOAD: {load1:^3.1} "
 
 [disk]
+# enabled = false  # set to false to disable this module at runtime
 # tokens: {mount}, {used}, {total}
 format = "{mount} {used:^3.0}/{total:^3.0}G"
 
 [pool]
+# enabled = false  # set to false to disable this module at runtime
 # tokens: {used}, {total}
 format = "{used:>4.0}G / {total:>4.0}G"
 
 [power]
+# enabled = false  # set to false to disable this module at runtime
 # tokens: {percentage}, {icon}
 format = "{percentage:>3}%  {icon}"
 
 [audio]
+# enabled = false  # set to false to disable this module at runtime
 # tokens: {name}, {volume}, {icon}
 format_sink_unmuted = "{name} {volume:>3}% {icon}"
 format_sink_muted = "{name} {icon}"
@@ -70,6 +79,7 @@ format_source_unmuted = "{name} {volume:>3}% {icon}"
 format_source_muted = "{name} {icon}"
 
 [bt]
+# enabled = false  # set to false to disable this module at runtime
 # tokens: {alias}, {mac}, {left}, {right}, {anc}
 format_plugin = "{alias} [{left}|{right}] {anc} 󰂰"
 format_connected = "󰂰 {alias}"
@@ -77,21 +87,26 @@ format_disconnected = "󰂯 Disconnected"
 format_disabled = "󰂲 Off"
 
 [game]
+# enabled = false  # set to false to disable this module at runtime
 format_active = "<span size='large'>󰊖</span>"
 format_inactive = "<span size='large'></span>"
 
 [mpris]
+# enabled = false  # set to false to disable this module at runtime
 # tokens: {artist}, {title}, {album}, {status_icon}
 format = "{status_icon} {artist} - {title}"
 
 [backlight]
+# enabled = false  # set to false to disable this module at runtime
 # tokens: {percentage}, {icon}
 format = "{percentage:>3}% {icon}"
 
 [keyboard]
+# enabled = false  # set to false to disable this module at runtime
 # tokens: {layout}
 format = "{layout}"
 
 [dnd]
+# enabled = false  # set to false to disable this module at runtime
 format_dnd = "<span size='large'>󰂛</span>"
 format_normal = "<span size='large'>󰂚</span>"

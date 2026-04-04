@@ -183,7 +183,7 @@ pub async fn run_daemon(config_path: Option<PathBuf>) -> Result<()> {
 
     // 1. Network Task
     #[cfg(feature = "mod-network")]
-    {
+    if config.read().await.network.enabled {
         let token = cancel_token.clone();
         let net_health = Arc::clone(&health);
         tokio::spawn(async move {
@@ -206,48 +206,58 @@ pub async fn run_daemon(config_path: Option<PathBuf>) -> Result<()> {
     // 2. Fast Hardware Task (CPU, Mem, Load)
     #[cfg(feature = "mod-hardware")]
     {
-        let token = cancel_token.clone();
-        let hw_health = Arc::clone(&health);
-        tokio::spawn(async move {
-            info!("Starting Fast Hardware polling task");
-            let mut daemon = HardwareDaemon::new();
-            loop {
-                if !crate::health::is_poll_in_backoff("cpu", &hw_health).await {
-                    daemon.poll_fast(&cpu_tx, &mem_tx, &sys_tx).await;
+        let cfg = config.read().await;
+        let fast_enabled = cfg.cpu.enabled || cfg.memory.enabled || cfg.sys.enabled;
+        drop(cfg);
+        if fast_enabled {
+            let token = cancel_token.clone();
+            let hw_health = Arc::clone(&health);
+            tokio::spawn(async move {
+                info!("Starting Fast Hardware polling task");
+                let mut daemon = HardwareDaemon::new();
+                loop {
+                    if !crate::health::is_poll_in_backoff("cpu", &hw_health).await {
+                        daemon.poll_fast(&cpu_tx, &mem_tx, &sys_tx).await;
+                    }
+                    tokio::select! {
+                        _ = token.cancelled() => break,
+                        _ = sleep(Duration::from_secs(1)) => {}
+                    }
                 }
-                tokio::select! {
-                    _ = token.cancelled() => break,
-                    _ = sleep(Duration::from_secs(1)) => {}
-                }
-            }
-            info!("Fast Hardware task shut down.");
-        });
+                info!("Fast Hardware task shut down.");
+            });
+        }
     }
 
     // 3. Slow Hardware Task (GPU, Disks)
     #[cfg(feature = "mod-hardware")]
     {
-        let token = cancel_token.clone();
-        let slow_health = Arc::clone(&health);
-        tokio::spawn(async move {
-            info!("Starting Slow Hardware polling task");
-            let mut daemon = HardwareDaemon::new();
-            loop {
-                if !crate::health::is_poll_in_backoff("gpu", &slow_health).await {
-                    daemon.poll_slow(&gpu_tx, &disks_tx).await;
+        let cfg = config.read().await;
+        let slow_enabled = cfg.gpu.enabled || cfg.disk.enabled;
+        drop(cfg);
+        if slow_enabled {
+            let token = cancel_token.clone();
+            let slow_health = Arc::clone(&health);
+            tokio::spawn(async move {
+                info!("Starting Slow Hardware polling task");
+                let mut daemon = HardwareDaemon::new();
+                loop {
+                    if !crate::health::is_poll_in_backoff("gpu", &slow_health).await {
+                        daemon.poll_slow(&gpu_tx, &disks_tx).await;
+                    }
+                    tokio::select! {
+                        _ = token.cancelled() => break,
+                        _ = sleep(Duration::from_secs(5)) => {}
+                    }
                 }
-                tokio::select! {
-                    _ = token.cancelled() => break,
-                    _ = sleep(Duration::from_secs(5)) => {}
-                }
-            }
-            info!("Slow Hardware task shut down.");
-        });
+                info!("Slow Hardware task shut down.");
+            });
+        }
     }
 
     // 4. Bluetooth Task
     #[cfg(feature = "mod-bt")]
-    {
+    if config.read().await.bt.enabled {
         let token = cancel_token.clone();
         let bt_health = Arc::clone(&health);
         let poll_config = Arc::clone(&config);
@@ -272,35 +282,35 @@ pub async fn run_daemon(config_path: Option<PathBuf>) -> Result<()> {
 
     // 5. Audio Thread (Event driven)
     #[cfg(feature = "mod-audio")]
-    {
+    if config.read().await.audio.enabled {
         let audio_daemon = AudioDaemon::new();
         audio_daemon.start(&audio_tx, audio_cmd_rx);
     }
 
     // 5.1 Backlight Thread (Event driven)
     #[cfg(feature = "mod-dbus")]
-    {
+    if config.read().await.backlight.enabled {
         let backlight_daemon = BacklightDaemon::new();
         backlight_daemon.start(backlight_tx);
     }
 
     // 5.2 Keyboard Thread (Event driven)
     #[cfg(feature = "mod-dbus")]
-    {
+    if config.read().await.keyboard.enabled {
         let keyboard_daemon = KeyboardDaemon::new();
         keyboard_daemon.start(keyboard_tx);
     }
 
     // 5.3 DND Thread (Event driven)
     #[cfg(feature = "mod-dbus")]
-    {
+    if config.read().await.dnd.enabled {
         let dnd_daemon = DndDaemon::new();
         dnd_daemon.start(dnd_tx);
     }
 
     // 5.4 MPRIS Thread
     #[cfg(feature = "mod-dbus")]
-    {
+    if config.read().await.mpris.enabled {
         let mpris_daemon = MprisDaemon::new();
         mpris_daemon.start(mpris_tx);
     }
@@ -416,6 +426,9 @@ async fn handle_request(
 
     match result {
         Ok(output) => serde_json::to_string(&output).unwrap_or_else(|_| "{}".to_string()),
+        Err(crate::error::FluxoError::Disabled(_)) => {
+            "{\"text\":\"\",\"tooltip\":\"Module disabled\",\"class\":\"disabled\"}".to_string()
+        }
         Err(e) => crate::health::error_response(module_name, &e, cached_output),
     }
 }

@@ -12,6 +12,10 @@ pub async fn dispatch(
     #[allow(unused)] state: &AppReceivers,
     #[allow(unused)] args: &[&str],
 ) -> FluxoResult<WaybarOutput> {
+    if !config.is_module_enabled(module_name) {
+        return Err(FluxoError::Disabled(module_name.to_string()));
+    }
+
     match module_name {
         #[cfg(feature = "mod-network")]
         "net" | "network" => {

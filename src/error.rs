@@ -33,6 +33,9 @@ pub enum FluxoError {
     #[error("Serialization error: {0}")]
     Serialization(#[from] serde_json::Error),
 
+    #[error("Module disabled: {0}")]
+    Disabled(String),
+
     #[error("Other error: {0}")]
     Other(#[from] anyhow::Error),
 }

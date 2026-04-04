@@ -36,6 +36,7 @@ pub async fn update_health(
             health.backoff_until = None;
             health.last_successful_output = Some(output.clone());
         }
+        Err(crate::error::FluxoError::Disabled(_)) => {}
         Err(e) => {
             health.consecutive_failures += 1;
             health.last_failure = Some(Instant::now());
