@@ -31,6 +31,64 @@ use tokio::time::{Duration, sleep};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info};
 
+/// Spawn a health-tracked polling loop. `$poll_expr` is awaited each cycle.
+macro_rules! spawn_poll_loop {
+    ($name:expr, $interval:expr, $health:expr, $token:expr, $poll_expr:expr) => {
+        tokio::spawn(async move {
+            info!(concat!("Starting ", $name, " polling task"));
+            loop {
+                if !crate::health::is_poll_in_backoff($name, &$health).await {
+                    let res: crate::error::Result<()> = $poll_expr.await;
+                    crate::health::handle_poll_result($name, res, &$health).await;
+                }
+                tokio::select! {
+                    _ = $token.cancelled() => break,
+                    _ = sleep($interval) => {}
+                }
+            }
+            info!(concat!($name, " task shut down."));
+        })
+    };
+}
+
+/// Spawn a health-tracked polling loop with an extra trigger channel for early wake-up.
+macro_rules! spawn_poll_loop_triggered {
+    ($name:expr, $interval:expr, $health:expr, $token:expr, $trigger:expr, $poll_expr:expr) => {
+        tokio::spawn(async move {
+            info!(concat!("Starting ", $name, " polling task"));
+            loop {
+                if !crate::health::is_poll_in_backoff($name, &$health).await {
+                    let res: crate::error::Result<()> = $poll_expr.await;
+                    crate::health::handle_poll_result($name, res, &$health).await;
+                }
+                tokio::select! {
+                    _ = $token.cancelled() => break,
+                    _ = $trigger.recv() => {},
+                    _ = sleep($interval) => {}
+                }
+            }
+            info!(concat!($name, " task shut down."));
+        })
+    };
+}
+
+/// Spawn a simple polling loop without health tracking.
+macro_rules! spawn_poll_loop_simple {
+    ($name:expr, $interval:expr, $token:expr, $poll_expr:expr) => {
+        tokio::spawn(async move {
+            info!(concat!("Starting ", $name, " polling task"));
+            loop {
+                $poll_expr.await;
+                tokio::select! {
+                    _ = $token.cancelled() => break,
+                    _ = sleep($interval) => {}
+                }
+            }
+            info!(concat!($name, " task shut down."));
+        })
+    };
+}
+
 struct SocketGuard {
     path: String,
 }
@@ -196,23 +254,16 @@ pub async fn run_daemon(config_path: Option<PathBuf>) -> Result<()> {
     // 1. Network Task
     #[cfg(feature = "mod-network")]
     if config.read().await.network.enabled {
+        let mut daemon = NetworkDaemon::new();
         let token = cancel_token.clone();
-        let net_health = Arc::clone(&health);
-        tokio::spawn(async move {
-            info!("Starting Network polling task");
-            let mut daemon = NetworkDaemon::new();
-            loop {
-                if !crate::health::is_poll_in_backoff("net", &net_health).await {
-                    let res = daemon.poll(&net_tx).await;
-                    crate::health::handle_poll_result("net", res, &net_health).await;
-                }
-                tokio::select! {
-                    _ = token.cancelled() => break,
-                    _ = sleep(Duration::from_secs(1)) => {}
-                }
-            }
-            info!("Network task shut down.");
-        });
+        let h = Arc::clone(&health);
+        spawn_poll_loop!(
+            "net",
+            Duration::from_secs(1),
+            h,
+            token,
+            daemon.poll(&net_tx)
+        );
     }
 
     // 2. Fast Hardware Task (CPU, Mem, Load)
@@ -222,22 +273,14 @@ pub async fn run_daemon(config_path: Option<PathBuf>) -> Result<()> {
         let fast_enabled = cfg.cpu.enabled || cfg.memory.enabled || cfg.sys.enabled;
         drop(cfg);
         if fast_enabled {
+            let mut daemon = HardwareDaemon::new();
             let token = cancel_token.clone();
-            let hw_health = Arc::clone(&health);
-            tokio::spawn(async move {
-                info!("Starting Fast Hardware polling task");
-                let mut daemon = HardwareDaemon::new();
-                loop {
-                    if !crate::health::is_poll_in_backoff("cpu", &hw_health).await {
-                        daemon.poll_fast(&cpu_tx, &mem_tx, &sys_tx).await;
-                    }
-                    tokio::select! {
-                        _ = token.cancelled() => break,
-                        _ = sleep(Duration::from_secs(1)) => {}
-                    }
-                }
-                info!("Fast Hardware task shut down.");
-            });
+            spawn_poll_loop_simple!(
+                "fast_hw",
+                Duration::from_secs(1),
+                token,
+                daemon.poll_fast(&cpu_tx, &mem_tx, &sys_tx)
+            );
         }
     }
 
@@ -248,47 +291,29 @@ pub async fn run_daemon(config_path: Option<PathBuf>) -> Result<()> {
         let slow_enabled = cfg.gpu.enabled || cfg.disk.enabled;
         drop(cfg);
         if slow_enabled {
+            let mut daemon = HardwareDaemon::new();
             let token = cancel_token.clone();
-            let slow_health = Arc::clone(&health);
-            tokio::spawn(async move {
-                info!("Starting Slow Hardware polling task");
-                let mut daemon = HardwareDaemon::new();
-                loop {
-                    if !crate::health::is_poll_in_backoff("gpu", &slow_health).await {
-                        daemon.poll_slow(&gpu_tx, &disks_tx).await;
-                    }
-                    tokio::select! {
-                        _ = token.cancelled() => break,
-                        _ = sleep(Duration::from_secs(5)) => {}
-                    }
-                }
-                info!("Slow Hardware task shut down.");
-            });
+            spawn_poll_loop_simple!(
+                "slow_hw",
+                Duration::from_secs(5),
+                token,
+                daemon.poll_slow(&gpu_tx, &disks_tx)
+            );
         }
     }
 
     // 4. Bluetooth Task
     #[cfg(feature = "mod-bt")]
     if config.read().await.bt.enabled {
+        let mut daemon = BtDaemon::new();
         let token = cancel_token.clone();
-        let bt_health = Arc::clone(&health);
+        let h = Arc::clone(&health);
         let poll_config = Arc::clone(&config);
         let poll_receivers = receivers.clone();
-        tokio::spawn(async move {
-            info!("Starting Bluetooth polling task");
-            let mut daemon = BtDaemon::new();
-            loop {
-                if !crate::health::is_poll_in_backoff("bt", &bt_health).await {
-                    let config = poll_config.read().await;
-                    daemon.poll(&bt_tx, &poll_receivers, &config).await;
-                }
-                tokio::select! {
-                    _ = token.cancelled() => break,
-                    _ = bt_force_rx.recv() => {},
-                    _ = sleep(Duration::from_secs(2)) => {}
-                }
-            }
-            info!("Bluetooth task shut down.");
+        spawn_poll_loop_triggered!("bt", Duration::from_secs(2), h, token, bt_force_rx, async {
+            let config = poll_config.read().await;
+            daemon.poll(&bt_tx, &poll_receivers, &config).await;
+            Ok(())
         });
     }
 

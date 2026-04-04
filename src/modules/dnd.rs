@@ -7,9 +7,41 @@ use futures::StreamExt;
 use tokio::sync::watch;
 use tokio::time::Duration;
 use tracing::{debug, error, info};
-use zbus::{Connection, fdo::PropertiesProxy, names::InterfaceName, proxy};
+use zbus::proxy;
+use zbus::zvariant::OwnedValue;
+use zbus::{Connection, fdo::PropertiesProxy};
 
 pub struct DndModule;
+
+/// Read dunst's `paused` property via raw D-Bus call.
+async fn dunst_get_paused(connection: &Connection) -> anyhow::Result<bool> {
+    let reply = connection
+        .call_method(
+            Some("org.freedesktop.Notifications"),
+            "/org/freedesktop/Notifications",
+            Some("org.freedesktop.DBus.Properties"),
+            "Get",
+            &("org.dunstproject.cmd0", "paused"),
+        )
+        .await?;
+    let value: OwnedValue = reply.body().deserialize()?;
+    Ok(bool::try_from(&*value)?)
+}
+
+/// Set dunst's `paused` property via raw D-Bus call.
+async fn dunst_set_paused(connection: &Connection, paused: bool) -> anyhow::Result<()> {
+    let value = zbus::zvariant::Value::from(paused);
+    connection
+        .call_method(
+            Some("org.freedesktop.Notifications"),
+            "/org/freedesktop/Notifications",
+            Some("org.freedesktop.DBus.Properties"),
+            "Set",
+            &("org.dunstproject.cmd0", "paused", value),
+        )
+        .await?;
+    Ok(())
+}
 
 impl WaybarModule for DndModule {
     async fn run(
@@ -29,7 +61,7 @@ impl WaybarModule for DndModule {
                         message: format!("DBus connection failed: {}", e),
                     })?;
 
-            // Try toggling SwayNC
+            // Try SwayNC
             if let Ok(proxy) = SwayncControlProxy::new(&connection).await
                 && let Ok(is_dnd) = proxy.dnd().await
             {
@@ -37,11 +69,9 @@ impl WaybarModule for DndModule {
                 return Ok(WaybarOutput::default());
             }
 
-            // Try toggling Dunst
-            if let Ok(proxy) = DunstControlProxy::new(&connection).await
-                && let Ok(is_paused) = proxy.paused().await
-            {
-                let _ = proxy.set_paused(!is_paused).await;
+            // Try Dunst via raw D-Bus
+            if let Ok(is_paused) = dunst_get_paused(&connection).await {
+                let _ = dunst_set_paused(&connection, !is_paused).await;
                 return Ok(WaybarOutput::default());
             }
 
@@ -83,18 +113,6 @@ trait SwayncControl {
     fn dnd(&self) -> zbus::Result<bool>;
     #[zbus(property)]
     fn set_dnd(&self, value: bool) -> zbus::Result<()>;
-}
-
-#[proxy(
-    interface = "org.dunstproject.cmd0",
-    default_service = "org.freedesktop.Notifications",
-    default_path = "/org/freedesktop/Notifications"
-)]
-trait DunstControl {
-    #[zbus(property)]
-    fn paused(&self) -> zbus::Result<bool>;
-    #[zbus(property)]
-    fn set_paused(&self, value: bool) -> zbus::Result<()>;
 }
 
 impl DndDaemon {
@@ -146,53 +164,19 @@ impl DndDaemon {
             return Err(anyhow::anyhow!("SwayNC DND stream ended"));
         }
 
-        // Try Dunst (polling via raw D-Bus Properties.Get for maximum compatibility)
-        let props_proxy = PropertiesProxy::builder(&connection)
-            .destination("org.freedesktop.Notifications")?
-            .path("/org/freedesktop/Notifications")?
-            .build()
-            .await;
-
-        match &props_proxy {
-            Ok(_) => debug!("Created Properties proxy for Dunst"),
-            Err(e) => debug!("Failed to create Properties proxy for Dunst: {}", e),
-        }
-
-        if let Ok(props) = props_proxy {
-            // Read paused property via raw Properties.Get
-            let initial = props
-                .get(
-                    InterfaceName::from_static_str_unchecked("org.dunstproject.cmd0"),
-                    "paused",
-                )
-                .await;
-
-            match &initial {
-                Ok(_) => debug!("Successfully read Dunst paused property"),
-                Err(e) => debug!("Failed to read Dunst paused property: {}", e),
-            }
-
-            if let Ok(value) = initial
-                && let Ok(is_paused) = bool::try_from(&*value)
-            {
+        // Try Dunst via raw D-Bus calls (bypasses zbus proxy issues)
+        match dunst_get_paused(&connection).await {
+            Ok(is_paused) => {
                 info!("Found Dunst, using polling-based DND monitoring");
                 let _ = tx.send(DndState { is_dnd: is_paused });
 
                 loop {
                     tokio::time::sleep(Duration::from_secs(2)).await;
-                    match props
-                        .get(
-                            InterfaceName::from_static_str_unchecked("org.dunstproject.cmd0"),
-                            "paused",
-                        )
-                        .await
-                    {
-                        Ok(value) => {
-                            if let Ok(is_paused) = bool::try_from(&*value) {
-                                let current = tx.borrow().is_dnd;
-                                if current != is_paused {
-                                    let _ = tx.send(DndState { is_dnd: is_paused });
-                                }
+                    match dunst_get_paused(&connection).await {
+                        Ok(is_paused) => {
+                            let current = tx.borrow().is_dnd;
+                            if current != is_paused {
+                                let _ = tx.send(DndState { is_dnd: is_paused });
                             }
                         }
                         Err(e) => {
@@ -203,6 +187,9 @@ impl DndDaemon {
                 }
 
                 return Err(anyhow::anyhow!("Dunst connection lost"));
+            }
+            Err(e) => {
+                info!("Dunst not available: {}", e);
             }
         }
 
