@@ -5,8 +5,9 @@ use crate::output::WaybarOutput;
 use crate::state::{AppReceivers, DndState};
 use futures::StreamExt;
 use tokio::sync::watch;
+use tokio::time::Duration;
 use tracing::{debug, error, info};
-use zbus::{Connection, fdo::PropertiesProxy, proxy};
+use zbus::{Connection, fdo::PropertiesProxy, names::InterfaceName, proxy};
 
 pub struct DndModule;
 
@@ -117,11 +118,11 @@ impl DndDaemon {
 
         info!("Connected to D-Bus for DND monitoring");
 
-        // Try SwayNC
+        // Try SwayNC first (signal-based)
         if let Ok(proxy) = SwayncControlProxy::new(&connection).await
             && let Ok(is_dnd) = proxy.dnd().await
         {
-            debug!("Found SwayNC, using it for DND state.");
+            debug!("Found SwayNC, using signal-based DND monitoring");
             let _ = tx.send(DndState { is_dnd });
 
             if let Ok(props_proxy) = PropertiesProxy::builder(&connection)
@@ -141,34 +142,72 @@ impl DndDaemon {
                     }
                 }
             }
+
+            return Err(anyhow::anyhow!("SwayNC DND stream ended"));
         }
 
-        // Try Dunst
-        if let Ok(proxy) = DunstControlProxy::new(&connection).await
-            && let Ok(is_dnd) = proxy.paused().await
-        {
-            debug!("Found Dunst, using it for DND state.");
-            let _ = tx.send(DndState { is_dnd });
+        // Try Dunst (polling via raw D-Bus Properties.Get for maximum compatibility)
+        let props_proxy = PropertiesProxy::builder(&connection)
+            .destination("org.freedesktop.Notifications")?
+            .path("/org/freedesktop/Notifications")?
+            .build()
+            .await;
 
-            if let Ok(props_proxy) = PropertiesProxy::builder(&connection)
-                .destination("org.freedesktop.Notifications")?
-                .path("/org/freedesktop/Notifications")?
-                .build()
-                .await
+        match &props_proxy {
+            Ok(_) => debug!("Created Properties proxy for Dunst"),
+            Err(e) => debug!("Failed to create Properties proxy for Dunst: {}", e),
+        }
+
+        if let Ok(props) = props_proxy {
+            // Read paused property via raw Properties.Get
+            let initial = props
+                .get(
+                    InterfaceName::from_static_str_unchecked("org.dunstproject.cmd0"),
+                    "paused",
+                )
+                .await;
+
+            match &initial {
+                Ok(_) => debug!("Successfully read Dunst paused property"),
+                Err(e) => debug!("Failed to read Dunst paused property: {}", e),
+            }
+
+            if let Ok(value) = initial
+                && let Ok(is_paused) = bool::try_from(&*value)
             {
-                let mut stream = props_proxy.receive_properties_changed().await?;
-                while let Some(signal) = stream.next().await {
-                    let args = signal.args()?;
-                    if args.interface_name == "org.dunstproject.cmd0"
-                        && let Some(val) = args.changed_properties.get("paused")
-                        && let Ok(is_dnd) = bool::try_from(val)
+                info!("Found Dunst, using polling-based DND monitoring");
+                let _ = tx.send(DndState { is_dnd: is_paused });
+
+                loop {
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                    match props
+                        .get(
+                            InterfaceName::from_static_str_unchecked("org.dunstproject.cmd0"),
+                            "paused",
+                        )
+                        .await
                     {
-                        let _ = tx.send(DndState { is_dnd });
+                        Ok(value) => {
+                            if let Ok(is_paused) = bool::try_from(&*value) {
+                                let current = tx.borrow().is_dnd;
+                                if current != is_paused {
+                                    let _ = tx.send(DndState { is_dnd: is_paused });
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            debug!("Dunst paused() poll failed: {}", e);
+                            break;
+                        }
                     }
                 }
+
+                return Err(anyhow::anyhow!("Dunst connection lost"));
             }
         }
 
-        Err(anyhow::anyhow!("DND stream ended or daemon not found"))
+        Err(anyhow::anyhow!(
+            "No supported notification daemon found (tried SwayNC, Dunst)"
+        ))
     }
 }

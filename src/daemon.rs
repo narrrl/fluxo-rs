@@ -85,6 +85,8 @@ pub async fn run_daemon(config_path: Option<PathBuf>) -> Result<()> {
     let health = Arc::new(RwLock::new(HashMap::new()));
     #[cfg(feature = "mod-bt")]
     let (bt_force_tx, mut bt_force_rx) = mpsc::channel(1);
+    #[cfg(feature = "mod-bt")]
+    let bt_cycle = Arc::new(RwLock::new(0usize));
     #[cfg(feature = "mod-audio")]
     let (audio_cmd_tx, audio_cmd_rx) = mpsc::channel(8);
 
@@ -103,6 +105,8 @@ pub async fn run_daemon(config_path: Option<PathBuf>) -> Result<()> {
         disks: disks_rx,
         #[cfg(feature = "mod-bt")]
         bluetooth: bt_rx,
+        #[cfg(feature = "mod-bt")]
+        bt_cycle,
         #[cfg(feature = "mod-audio")]
         audio: audio_rx,
         #[cfg(feature = "mod-dbus")]

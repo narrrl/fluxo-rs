@@ -20,6 +20,8 @@ pub struct AppReceivers {
     pub disks: watch::Receiver<Vec<DiskInfo>>,
     #[cfg(feature = "mod-bt")]
     pub bluetooth: watch::Receiver<BtState>,
+    #[cfg(feature = "mod-bt")]
+    pub bt_cycle: Arc<RwLock<usize>>,
     #[cfg(feature = "mod-audio")]
     pub audio: watch::Receiver<AudioState>,
     #[cfg(feature = "mod-dbus")]
@@ -76,13 +78,27 @@ pub struct AudioSourceInfo {
 }
 
 #[derive(Default, Clone)]
-pub struct BtState {
-    pub connected: bool,
-    pub adapter_powered: bool,
+pub struct BtDeviceInfo {
     pub device_alias: String,
     pub device_address: String,
     pub battery_percentage: Option<u8>,
     pub plugin_data: Vec<(String, String)>,
+}
+
+#[derive(Default, Clone)]
+pub struct BtState {
+    pub adapter_powered: bool,
+    pub devices: Vec<BtDeviceInfo>,
+}
+
+impl BtState {
+    pub fn active_device(&self, index: usize) -> Option<&BtDeviceInfo> {
+        if self.devices.is_empty() {
+            None
+        } else {
+            Some(&self.devices[index % self.devices.len()])
+        }
+    }
 }
 
 #[derive(Default, Clone)]
@@ -295,6 +311,8 @@ pub fn mock_state(state: AppState) -> MockState {
             disks: disks_rx,
             #[cfg(feature = "mod-bt")]
             bluetooth: bt_rx,
+            #[cfg(feature = "mod-bt")]
+            bt_cycle: Arc::new(RwLock::new(0usize)),
             #[cfg(feature = "mod-audio")]
             audio: audio_rx,
             #[cfg(feature = "mod-dbus")]

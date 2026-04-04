@@ -83,30 +83,47 @@ fn main() {
             let config = config::load_config(None);
             let mut items = Vec::new();
 
-            if let Ok(json_str) = ipc::request_data("bt", &["get_modes"])
-                && let Ok(val) = serde_json::from_str::<serde_json::Value>(&json_str)
-                && let Some(modes_str) = val.get("text").and_then(|t| t.as_str())
-                && !modes_str.is_empty()
-            {
-                for mode in modes_str.lines() {
-                    items.push(format!("Mode: {}", mode));
-                }
-            }
-
-            if !items.is_empty() {
-                items.push("Disconnect".to_string());
-            }
-
-            items.push("--- Connect Device ---".to_string());
+            // Parse menu_data to get connected and paired devices
+            let mut connected: Vec<(String, String)> = Vec::new(); // (alias, mac)
+            let mut paired: Vec<(String, String)> = Vec::new();
 
             if let Ok(json_str) = ipc::request_data("bt", &["menu_data"])
                 && let Ok(val) = serde_json::from_str::<serde_json::Value>(&json_str)
-                && let Some(devices_str) = val.get("text").and_then(|t| t.as_str())
+                && let Some(text) = val.get("text").and_then(|t| t.as_str())
             {
-                for line in devices_str.lines() {
-                    if !line.is_empty() {
-                        items.push(line.to_string());
+                for line in text.lines() {
+                    if let Some(rest) = line.strip_prefix("CONNECTED:")
+                        && let Some((alias, mac)) = rest.split_once('|')
+                    {
+                        connected.push((alias.to_string(), mac.to_string()));
+                    } else if let Some(rest) = line.strip_prefix("PAIRED:")
+                        && let Some((alias, mac)) = rest.split_once('|')
+                    {
+                        paired.push((alias.to_string(), mac.to_string()));
                     }
+                }
+            }
+
+            // Per-device sections for connected devices
+            for (alias, mac) in &connected {
+                // Get modes for this specific device
+                if let Ok(json_str) = ipc::request_data("bt", &["get_modes", mac])
+                    && let Ok(val) = serde_json::from_str::<serde_json::Value>(&json_str)
+                    && let Some(modes_str) = val.get("text").and_then(|t| t.as_str())
+                    && !modes_str.is_empty()
+                {
+                    for mode in modes_str.lines() {
+                        items.push(format!("{}: Mode: {} [{}]", alias, mode, mac));
+                    }
+                }
+                items.push(format!("Disconnect {} [{}]", alias, mac));
+            }
+
+            // Separator and paired devices for connecting
+            if !paired.is_empty() {
+                items.push("--- Connect Device ---".to_string());
+                for (alias, mac) in &paired {
+                    items.push(format!("{} ({})", alias, mac));
                 }
             }
 
@@ -114,12 +131,31 @@ fn main() {
                 if let Ok(selected) =
                     utils::show_menu("BT Menu: ", &items, &config.general.menu_command)
                 {
-                    if let Some(mode) = selected.strip_prefix("Mode: ") {
-                        handle_ipc_response(ipc::request_data("bt", &["set_mode", mode]));
-                    } else if selected == "Disconnect" {
-                        handle_ipc_response(ipc::request_data("bt", &["disconnect"]));
+                    if selected.contains(": Mode: ") {
+                        // "<alias>: Mode: <mode> [<MAC>]"
+                        if let Some(bracket_start) = selected.rfind('[')
+                            && let Some(bracket_end) = selected.rfind(']')
+                        {
+                            let mac = &selected[bracket_start + 1..bracket_end];
+                            if let Some(mode_start) = selected.find(": Mode: ") {
+                                let mode =
+                                    &selected[mode_start + ": Mode: ".len()..bracket_start - 1];
+                                handle_ipc_response(ipc::request_data(
+                                    "bt",
+                                    &["set_mode", mode, mac],
+                                ));
+                            }
+                        }
+                    } else if selected.starts_with("Disconnect ") {
+                        // "Disconnect <alias> [<MAC>]"
+                        if let Some(bracket_start) = selected.rfind('[')
+                            && let Some(bracket_end) = selected.rfind(']')
+                        {
+                            let mac = &selected[bracket_start + 1..bracket_end];
+                            handle_ipc_response(ipc::request_data("bt", &["disconnect", mac]));
+                        }
                     } else if selected == "--- Connect Device ---" {
-                        // Do nothing
+                        // separator, do nothing
                     } else if let Some(mac_start) = selected.rfind('(')
                         && let Some(mac_end) = selected.rfind(')')
                     {

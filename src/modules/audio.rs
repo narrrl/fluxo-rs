@@ -9,6 +9,7 @@ use libpulse_binding::context::subscribe::{Facility, InterestMaskSet};
 use libpulse_binding::context::{Context, FlagSet as ContextFlag};
 use libpulse_binding::mainloop::threaded::Mainloop as ThreadedMainloop;
 use libpulse_binding::volume::Volume;
+use std::sync::Arc;
 use tokio::sync::{mpsc, watch};
 use tracing::error;
 
@@ -230,15 +231,16 @@ fn fetch_audio_data_sync(
     });
 
     let tx_sink = state_tx.clone();
+    let pending_sinks: Arc<std::sync::Mutex<Vec<String>>> =
+        Arc::new(std::sync::Mutex::new(Vec::new()));
+    let pending_sinks_cb = Arc::clone(&pending_sinks);
     context.introspect().get_sink_info_list(move |res| {
         let mut current = tx_sink.borrow().clone();
         match res {
             ListResult::Item(item) => {
                 if let Some(name) = item.name.as_ref() {
                     let name_str = name.to_string();
-                    if !current.available_sinks.contains(&name_str) {
-                        current.available_sinks.push(name_str);
-                    }
+                    pending_sinks_cb.lock().unwrap().push(name_str);
                 }
 
                 let is_default = item
@@ -261,8 +263,7 @@ fn fetch_audio_data_sync(
                 let _ = tx_sink.send(current);
             }
             ListResult::End => {
-                // Clear the list on End so it rebuilds fresh next time
-                current.available_sinks.clear();
+                current.available_sinks = pending_sinks_cb.lock().unwrap().drain(..).collect();
                 let _ = tx_sink.send(current);
             }
             ListResult::Error => {}
@@ -270,17 +271,17 @@ fn fetch_audio_data_sync(
     });
 
     let tx_source = state_tx.clone();
+    let pending_sources: Arc<std::sync::Mutex<Vec<String>>> =
+        Arc::new(std::sync::Mutex::new(Vec::new()));
+    let pending_sources_cb = Arc::clone(&pending_sources);
     context.introspect().get_source_info_list(move |res| {
         let mut current = tx_source.borrow().clone();
         match res {
             ListResult::Item(item) => {
                 if let Some(name) = item.name.as_ref() {
                     let name_str = name.to_string();
-                    // PulseAudio includes monitor sources, ignore them if we want to
-                    if !name_str.contains(".monitor")
-                        && !current.available_sources.contains(&name_str)
-                    {
-                        current.available_sources.push(name_str);
+                    if !name_str.contains(".monitor") {
+                        pending_sources_cb.lock().unwrap().push(name_str);
                     }
                 }
 
@@ -304,8 +305,7 @@ fn fetch_audio_data_sync(
                 let _ = tx_source.send(current);
             }
             ListResult::End => {
-                // Clear the list on End so it rebuilds fresh next time
-                current.available_sources.clear();
+                current.available_sources = pending_sources_cb.lock().unwrap().drain(..).collect();
                 let _ = tx_source.send(current);
             }
             ListResult::Error => {}
@@ -331,19 +331,19 @@ impl WaybarModule for AudioModule {
         match *action {
             "up" => {
                 self.change_volume(state, target_type, step, true).await?;
-                Ok(WaybarOutput::default())
+                self.get_status(config, state, target_type).await
             }
             "down" => {
                 self.change_volume(state, target_type, step, false).await?;
-                Ok(WaybarOutput::default())
+                self.get_status(config, state, target_type).await
             }
             "mute" => {
                 self.toggle_mute(state, target_type).await?;
-                Ok(WaybarOutput::default())
+                self.get_status(config, state, target_type).await
             }
             "cycle" => {
                 self.cycle_device(state, target_type).await?;
-                Ok(WaybarOutput::default())
+                self.get_status(config, state, target_type).await
             }
             "show" => self.get_status(config, state, target_type).await,
             other => Err(FluxoError::Module {
