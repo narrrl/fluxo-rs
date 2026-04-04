@@ -2,11 +2,65 @@ use crate::config::Config;
 use crate::error::Result;
 use crate::modules::WaybarModule;
 use crate::output::WaybarOutput;
-use crate::state::{AppReceivers, MprisState};
+use crate::state::{AppReceivers, MprisScrollState, MprisState};
 use crate::utils::{TokenValue, format_template};
-use tokio::sync::watch;
+use std::sync::Arc;
+use tokio::sync::{RwLock, watch};
+use tokio::time::Duration;
 use tracing::{debug, info};
 use zbus::{Connection, proxy};
+
+fn format_mpris_text(format: &str, mpris: &MprisState) -> (String, &'static str) {
+    let status_icon = if mpris.is_playing {
+        "󰏤"
+    } else if mpris.is_paused {
+        "󰐊"
+    } else {
+        "󰓛"
+    };
+
+    let class = if mpris.is_playing {
+        "playing"
+    } else if mpris.is_paused {
+        "paused"
+    } else {
+        "stopped"
+    };
+
+    let text = format_template(
+        format,
+        &[
+            ("artist", TokenValue::String(mpris.artist.clone())),
+            ("title", TokenValue::String(mpris.title.clone())),
+            ("album", TokenValue::String(mpris.album.clone())),
+            ("status_icon", TokenValue::String(status_icon.to_string())),
+        ],
+    );
+
+    (text, class)
+}
+
+fn apply_scroll_window(full_text: &str, max_len: usize, offset: usize, separator: &str) -> String {
+    let char_count = full_text.chars().count();
+    let total_len = char_count + separator.chars().count();
+    let offset = offset % total_len;
+    full_text
+        .chars()
+        .chain(separator.chars())
+        .cycle()
+        .skip(offset)
+        .take(max_len)
+        .collect()
+}
+
+fn truncate_with_ellipsis(text: &str, max_len: usize) -> String {
+    let char_count = text.chars().count();
+    if char_count <= max_len {
+        return text.to_string();
+    }
+    let truncated: String = text.chars().take(max_len.saturating_sub(3)).collect();
+    format!("{}...", truncated)
+}
 
 pub struct MprisModule;
 
@@ -28,31 +82,25 @@ impl WaybarModule for MprisModule {
             });
         }
 
-        let status_icon = if mpris.is_playing {
-            "󰏤"
-        } else if mpris.is_paused {
-            "󰐊"
-        } else {
-            "󰓛"
-        };
+        let (full_text, class) = format_mpris_text(&config.mpris.format, &mpris);
 
-        let class = if mpris.is_playing {
-            "playing"
-        } else if mpris.is_paused {
-            "paused"
+        let text = if config.mpris.scroll {
+            if let Some(max_len) = config.mpris.max_length {
+                let scroll = state.mpris_scroll.read().await;
+                apply_scroll_window(
+                    &full_text,
+                    max_len,
+                    scroll.offset,
+                    &config.mpris.scroll_separator,
+                )
+            } else {
+                full_text.clone()
+            }
+        } else if let Some(max_len) = config.mpris.max_length {
+            truncate_with_ellipsis(&full_text, max_len)
         } else {
-            "stopped"
+            full_text.clone()
         };
-
-        let text = format_template(
-            &config.mpris.format,
-            &[
-                ("artist", TokenValue::String(mpris.artist.clone())),
-                ("title", TokenValue::String(mpris.title.clone())),
-                ("album", TokenValue::String(mpris.album.clone())),
-                ("status_icon", TokenValue::String(status_icon.to_string())),
-            ],
-        );
 
         Ok(WaybarOutput {
             text,
@@ -60,6 +108,54 @@ impl WaybarModule for MprisModule {
             class: Some(class.to_string()),
             percentage: None,
         })
+    }
+}
+
+pub async fn mpris_scroll_ticker(
+    config: Arc<RwLock<Config>>,
+    mut mpris_rx: watch::Receiver<MprisState>,
+    scroll_state: Arc<RwLock<MprisScrollState>>,
+    tick_tx: watch::Sender<u64>,
+) {
+    let mut generation: u64 = 0;
+    let mut last_track_key = String::new();
+
+    loop {
+        let mpris = mpris_rx.borrow_and_update().clone();
+        let cfg = config.read().await;
+        let scroll_enabled = cfg.mpris.scroll;
+        let has_max_length = cfg.mpris.max_length.is_some();
+        let scroll_speed = cfg.mpris.scroll_speed;
+        let format_str = cfg.mpris.format.clone();
+        drop(cfg);
+
+        let (full_text, _) = format_mpris_text(&format_str, &mpris);
+        let track_key = format!("{}|{}|{}", mpris.artist, mpris.title, mpris.album);
+
+        if track_key != last_track_key {
+            let mut state = scroll_state.write().await;
+            state.offset = 0;
+            state.full_text = full_text.clone();
+            last_track_key = track_key;
+            generation += 1;
+            let _ = tick_tx.send(generation);
+        }
+
+        if scroll_enabled && has_max_length && mpris.is_playing {
+            tokio::time::sleep(Duration::from_millis(scroll_speed)).await;
+            let mut state = scroll_state.write().await;
+            state.offset += 1;
+            state.full_text = full_text;
+            drop(state);
+            generation += 1;
+            let _ = tick_tx.send(generation);
+            continue;
+        }
+
+        // Not scrolling — wait for next state change
+        if mpris_rx.changed().await.is_err() {
+            break;
+        }
     }
 }
 

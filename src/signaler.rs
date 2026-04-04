@@ -175,6 +175,13 @@ impl WaybarSignaler {
             #[cfg(feature = "mod-dbus")]
             let mpris_changed = receivers.mpris.changed();
 
+            #[cfg(not(feature = "mod-dbus"))]
+            let mpris_scroll_tick_changed = std::future::pending::<
+                std::result::Result<(), tokio::sync::watch::error::RecvError>,
+            >();
+            #[cfg(feature = "mod-dbus")]
+            let mpris_scroll_tick_changed = receivers.mpris_scroll_tick.changed();
+
             tokio::select! {
                 res = net_changed, if signals.network.is_some() => {
                     if res.is_ok() { check_and_signal!("net", signals.network); }
@@ -214,6 +221,10 @@ impl WaybarSignaler {
                 }
                 res = mpris_changed, if signals.mpris.is_some() => {
                     if res.is_ok() { check_and_signal!("mpris", signals.mpris); }
+                }
+                res = mpris_scroll_tick_changed, if signals.mpris.is_some() => {
+                    if res.is_ok()
+                        && let Some(sig) = signals.mpris { self.send_signal(sig); }
                 }
                 _ = sleep(Duration::from_secs(5)) => {
                     // loop and refresh config

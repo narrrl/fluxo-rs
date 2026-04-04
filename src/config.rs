@@ -290,6 +290,22 @@ pub struct MprisConfig {
     #[serde(default = "default_true")]
     pub enabled: bool,
     pub format: String,
+    #[serde(default)]
+    pub max_length: Option<usize>,
+    #[serde(default)]
+    pub scroll: bool,
+    #[serde(default = "default_scroll_speed")]
+    pub scroll_speed: u64,
+    #[serde(default = "default_scroll_separator")]
+    pub scroll_separator: String,
+}
+
+fn default_scroll_speed() -> u64 {
+    500
+}
+
+fn default_scroll_separator() -> String {
+    " /// ".to_string()
 }
 
 impl Default for MprisConfig {
@@ -297,6 +313,10 @@ impl Default for MprisConfig {
         Self {
             enabled: true,
             format: "{status_icon} {artist} - {title}".to_string(),
+            max_length: None,
+            scroll: false,
+            scroll_speed: 500,
+            scroll_separator: " /// ".to_string(),
         }
     }
 }

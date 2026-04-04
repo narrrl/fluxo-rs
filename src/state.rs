@@ -30,6 +30,10 @@ pub struct AppReceivers {
     pub keyboard: watch::Receiver<KeyboardState>,
     #[cfg(feature = "mod-dbus")]
     pub dnd: watch::Receiver<DndState>,
+    #[cfg(feature = "mod-dbus")]
+    pub mpris_scroll: Arc<RwLock<MprisScrollState>>,
+    #[cfg(feature = "mod-dbus")]
+    pub mpris_scroll_tick: watch::Receiver<u64>,
     pub health: Arc<RwLock<HashMap<String, ModuleHealth>>>,
     #[cfg(feature = "mod-bt")]
     pub bt_force_poll: mpsc::Sender<()>,
@@ -170,6 +174,12 @@ pub struct BacklightState {
 }
 
 #[derive(Default, Clone)]
+pub struct MprisScrollState {
+    pub offset: usize,
+    pub full_text: String,
+}
+
+#[derive(Default, Clone)]
 pub struct MprisState {
     pub is_playing: bool,
     pub is_paused: bool,
@@ -295,6 +305,13 @@ pub fn mock_state(state: AppState) -> MockState {
             keyboard: keyboard_rx,
             #[cfg(feature = "mod-dbus")]
             dnd: dnd_rx,
+            #[cfg(feature = "mod-dbus")]
+            mpris_scroll: Arc::new(RwLock::new(MprisScrollState::default())),
+            #[cfg(feature = "mod-dbus")]
+            mpris_scroll_tick: {
+                let (_, rx) = watch::channel(0u64);
+                rx
+            },
             health: Arc::new(RwLock::new(state.health)),
             #[cfg(feature = "mod-bt")]
             bt_force_poll: bt_force_tx,

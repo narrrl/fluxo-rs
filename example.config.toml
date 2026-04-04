@@ -93,6 +93,10 @@ format_inactive = "<span size='large'></span>"
 
 [mpris]
 # enabled = false  # set to false to disable this module at runtime
+# max_length = 30          # truncate text beyond this character length (adds '...')
+# scroll = true            # enable marquee scroll animation (requires max_length)
+# scroll_speed = 500       # ms between scroll steps (only while playing)
+# scroll_separator = " /// "  # separator shown between loops when scrolling
 # tokens: {artist}, {title}, {album}, {status_icon}
 format = "{status_icon} {artist} - {title}"
 

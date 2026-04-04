@@ -78,6 +78,10 @@ pub async fn run_daemon(config_path: Option<PathBuf>) -> Result<()> {
     let (keyboard_tx, keyboard_rx) = watch::channel(Default::default());
     #[cfg(feature = "mod-dbus")]
     let (dnd_tx, dnd_rx) = watch::channel(Default::default());
+    #[cfg(feature = "mod-dbus")]
+    let mpris_scroll = Arc::new(RwLock::new(crate::state::MprisScrollState::default()));
+    #[cfg(feature = "mod-dbus")]
+    let (mpris_scroll_tick_tx, mpris_scroll_tick_rx) = watch::channel(0u64);
     let health = Arc::new(RwLock::new(HashMap::new()));
     #[cfg(feature = "mod-bt")]
     let (bt_force_tx, mut bt_force_rx) = mpsc::channel(1);
@@ -109,6 +113,10 @@ pub async fn run_daemon(config_path: Option<PathBuf>) -> Result<()> {
         keyboard: keyboard_rx,
         #[cfg(feature = "mod-dbus")]
         dnd: dnd_rx,
+        #[cfg(feature = "mod-dbus")]
+        mpris_scroll: Arc::clone(&mpris_scroll),
+        #[cfg(feature = "mod-dbus")]
+        mpris_scroll_tick: mpris_scroll_tick_rx,
         health: Arc::clone(&health),
         #[cfg(feature = "mod-bt")]
         bt_force_poll: bt_force_tx,
@@ -313,6 +321,20 @@ pub async fn run_daemon(config_path: Option<PathBuf>) -> Result<()> {
     if config.read().await.mpris.enabled {
         let mpris_daemon = MprisDaemon::new();
         mpris_daemon.start(mpris_tx);
+
+        // Scroll ticker for MPRIS marquee animation
+        let scroll_config = Arc::clone(&config);
+        let scroll_rx = receivers.mpris.clone();
+        let scroll_state = Arc::clone(&mpris_scroll);
+        tokio::spawn(async move {
+            crate::modules::mpris::mpris_scroll_ticker(
+                scroll_config,
+                scroll_rx,
+                scroll_state,
+                mpris_scroll_tick_tx,
+            )
+            .await;
+        });
     }
 
     // 6. Waybar Signaler Task
