@@ -4,44 +4,29 @@ use std::sync::Arc;
 use tokio::sync::{RwLock, mpsc, watch};
 use tokio::time::Instant;
 
-#[derive(Clone)]
-pub struct AppReceivers {
-    #[cfg(feature = "mod-network")]
-    pub network: watch::Receiver<NetworkState>,
-    #[cfg(feature = "mod-hardware")]
-    pub cpu: watch::Receiver<CpuState>,
-    #[cfg(feature = "mod-hardware")]
-    pub memory: watch::Receiver<MemoryState>,
-    #[cfg(feature = "mod-hardware")]
-    pub sys: watch::Receiver<SysState>,
-    #[cfg(feature = "mod-hardware")]
-    pub gpu: watch::Receiver<GpuState>,
-    #[cfg(feature = "mod-hardware")]
-    pub disks: watch::Receiver<Vec<DiskInfo>>,
-    #[cfg(feature = "mod-bt")]
-    pub bluetooth: watch::Receiver<BtState>,
-    #[cfg(feature = "mod-bt")]
-    pub bt_cycle: Arc<RwLock<usize>>,
-    #[cfg(feature = "mod-audio")]
-    pub audio: watch::Receiver<AudioState>,
-    #[cfg(feature = "mod-dbus")]
-    pub mpris: watch::Receiver<MprisState>,
-    #[cfg(feature = "mod-dbus")]
-    pub backlight: watch::Receiver<BacklightState>,
-    #[cfg(feature = "mod-dbus")]
-    pub keyboard: watch::Receiver<KeyboardState>,
-    #[cfg(feature = "mod-dbus")]
-    pub dnd: watch::Receiver<DndState>,
-    #[cfg(feature = "mod-dbus")]
-    pub mpris_scroll: Arc<RwLock<MprisScrollState>>,
-    #[cfg(feature = "mod-dbus")]
-    pub mpris_scroll_tick: watch::Receiver<u64>,
-    pub health: Arc<RwLock<HashMap<String, ModuleHealth>>>,
-    #[cfg(feature = "mod-bt")]
-    pub bt_force_poll: mpsc::Sender<()>,
-    #[cfg(feature = "mod-audio")]
-    pub audio_cmd_tx: mpsc::Sender<crate::modules::audio::AudioCommand>,
+macro_rules! gen_app_receivers {
+    ($( { $feature:literal, $field:ident, $state:ty, [$($name:literal),+], [$($sig_name:literal),+], $module:path, $signal:ident, [$($default_arg:literal),*], $config:ident } )*) => {
+        #[derive(Clone)]
+        pub struct AppReceivers {
+            $(
+                #[cfg(feature = $feature)]
+                pub $field: watch::Receiver<$state>,
+            )*
+            #[cfg(feature = "mod-bt")]
+            pub bt_cycle: Arc<RwLock<usize>>,
+            #[cfg(feature = "mod-dbus")]
+            pub mpris_scroll: Arc<RwLock<MprisScrollState>>,
+            #[cfg(feature = "mod-dbus")]
+            pub mpris_scroll_tick: watch::Receiver<u64>,
+            pub health: Arc<RwLock<HashMap<String, ModuleHealth>>>,
+            #[cfg(feature = "mod-bt")]
+            pub bt_force_poll: mpsc::Sender<()>,
+            #[cfg(feature = "mod-audio")]
+            pub audio_cmd_tx: mpsc::Sender<crate::modules::audio::AudioCommand>,
+        }
+    };
 }
+for_each_watched_module!(gen_app_receivers);
 
 #[derive(Clone, Default)]
 pub struct ModuleHealth {

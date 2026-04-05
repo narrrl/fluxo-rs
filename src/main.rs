@@ -1,3 +1,5 @@
+#[macro_use]
+mod macros;
 mod config;
 mod daemon;
 mod error;
