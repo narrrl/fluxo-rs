@@ -2,7 +2,7 @@ use crate::config::Config;
 use crate::error::{FluxoError, Result};
 use crate::modules::WaybarModule;
 use crate::output::WaybarOutput;
-use crate::state::{AppReceivers, AudioState};
+use crate::state::{AppReceivers, AudioDeviceInfo, AudioState};
 use crate::utils::{TokenValue, format_template};
 use libpulse_binding::callbacks::ListResult;
 use libpulse_binding::context::subscribe::{Facility, InterestMaskSet};
@@ -230,89 +230,122 @@ fn fetch_audio_data_sync(
         let _ = tx_server.send(current);
     });
 
-    let tx_sink = state_tx.clone();
-    let pending_sinks: Arc<std::sync::Mutex<Vec<String>>> =
-        Arc::new(std::sync::Mutex::new(Vec::new()));
-    let pending_sinks_cb = Arc::clone(&pending_sinks);
-    context.introspect().get_sink_info_list(move |res| {
-        let mut current = tx_sink.borrow().clone();
-        match res {
-            ListResult::Item(item) => {
-                if let Some(name) = item.name.as_ref() {
-                    let name_str = name.to_string();
-                    pending_sinks_cb.lock().unwrap().push(name_str);
-                }
-
-                let is_default = item
-                    .name
-                    .as_ref()
-                    .map(|s| s.as_ref() == current.sink.name)
-                    .unwrap_or(false);
-                if is_default {
-                    current.sink.description = item
-                        .description
-                        .as_ref()
-                        .map(|s| s.to_string())
-                        .unwrap_or_default();
-                    current.sink.volume = ((item.volume.avg().0 as f64 / Volume::NORMAL.0 as f64)
-                        * 100.0)
-                        .round() as u8;
-                    current.sink.muted = item.mute;
-                    current.sink.channels = item.volume.len();
-                }
-                let _ = tx_sink.send(current);
-            }
-            ListResult::End => {
-                current.available_sinks = pending_sinks_cb.lock().unwrap().drain(..).collect();
-                let _ = tx_sink.send(current);
-            }
-            ListResult::Error => {}
-        }
-    });
-
-    let tx_source = state_tx.clone();
-    let pending_sources: Arc<std::sync::Mutex<Vec<String>>> =
-        Arc::new(std::sync::Mutex::new(Vec::new()));
-    let pending_sources_cb = Arc::clone(&pending_sources);
-    context.introspect().get_source_info_list(move |res| {
-        let mut current = tx_source.borrow().clone();
-        match res {
-            ListResult::Item(item) => {
-                if let Some(name) = item.name.as_ref() {
-                    let name_str = name.to_string();
-                    if !name_str.contains(".monitor") {
-                        pending_sources_cb.lock().unwrap().push(name_str);
-                    }
-                }
-
-                let is_default = item
-                    .name
-                    .as_ref()
-                    .map(|s| s.as_ref() == current.source.name)
-                    .unwrap_or(false);
-                if is_default {
-                    current.source.description = item
-                        .description
-                        .as_ref()
-                        .map(|s| s.to_string())
-                        .unwrap_or_default();
-                    current.source.volume = ((item.volume.avg().0 as f64 / Volume::NORMAL.0 as f64)
-                        * 100.0)
-                        .round() as u8;
-                    current.source.muted = item.mute;
-                    current.source.channels = item.volume.len();
-                }
-                let _ = tx_source.send(current);
-            }
-            ListResult::End => {
-                current.available_sources = pending_sources_cb.lock().unwrap().drain(..).collect();
-                let _ = tx_source.send(current);
-            }
-            ListResult::Error => {}
-        }
-    });
+    fetch_sinks(context, state_tx);
+    fetch_sources(context, state_tx);
 
     Ok(())
+}
+
+/// Shared bookkeeping for a device list fetch.
+struct PendingList {
+    names: Arc<std::sync::Mutex<Vec<String>>>,
+}
+
+impl PendingList {
+    fn new() -> Self {
+        Self {
+            names: Arc::new(std::sync::Mutex::new(Vec::new())),
+        }
+    }
+
+    fn push(&self, name: String) {
+        self.names.lock().unwrap().push(name);
+    }
+
+    fn drain(&self) -> Vec<String> {
+        self.names.lock().unwrap().drain(..).collect()
+    }
+}
+
+/// Extract common device info from a pulse item's volume/mute/description fields.
+fn device_info_from(
+    description: Option<&str>,
+    volume: &libpulse_binding::volume::ChannelVolumes,
+    muted: bool,
+) -> (String, u8, bool, u8) {
+    let desc = description.unwrap_or_default().to_string();
+    let vol = ((volume.avg().0 as f64 / Volume::NORMAL.0 as f64) * 100.0).round() as u8;
+    let channels = volume.len();
+    (desc, vol, muted, channels)
+}
+
+fn apply_device_info(target: &mut AudioDeviceInfo, item_name: &str, info: (String, u8, bool, u8)) {
+    if item_name == target.name {
+        target.description = info.0;
+        target.volume = info.1;
+        target.muted = info.2;
+        target.channels = info.3;
+    }
+}
+
+fn fetch_sinks(context: &mut Context, state_tx: &watch::Sender<AudioState>) {
+    let tx = state_tx.clone();
+    let pending = PendingList::new();
+    let pending_cb = PendingList {
+        names: Arc::clone(&pending.names),
+    };
+    context.introspect().get_sink_info_list(move |res| {
+        let mut current = tx.borrow().clone();
+        match res {
+            ListResult::Item(item) => {
+                let name_str = item
+                    .name
+                    .as_ref()
+                    .map(|s| s.to_string())
+                    .unwrap_or_default();
+                if !name_str.is_empty() {
+                    pending_cb.push(name_str.clone());
+                }
+                let info = device_info_from(
+                    item.description.as_ref().map(|s| s.as_ref()),
+                    &item.volume,
+                    item.mute,
+                );
+                apply_device_info(&mut current.sink, &name_str, info);
+                let _ = tx.send(current);
+            }
+            ListResult::End => {
+                current.available_sinks = pending_cb.drain();
+                let _ = tx.send(current);
+            }
+            ListResult::Error => {}
+        }
+    });
+}
+
+fn fetch_sources(context: &mut Context, state_tx: &watch::Sender<AudioState>) {
+    let tx = state_tx.clone();
+    let pending = PendingList::new();
+    let pending_cb = PendingList {
+        names: Arc::clone(&pending.names),
+    };
+    context.introspect().get_source_info_list(move |res| {
+        let mut current = tx.borrow().clone();
+        match res {
+            ListResult::Item(item) => {
+                let name_str = item
+                    .name
+                    .as_ref()
+                    .map(|s| s.to_string())
+                    .unwrap_or_default();
+                if !name_str.is_empty() && !name_str.contains(".monitor") {
+                    pending_cb.push(name_str.clone());
+                }
+                let info = device_info_from(
+                    item.description.as_ref().map(|s| s.as_ref()),
+                    &item.volume,
+                    item.mute,
+                );
+                apply_device_info(&mut current.source, &name_str, info);
+                let _ = tx.send(current);
+            }
+            ListResult::End => {
+                current.available_sources = pending_cb.drain();
+                let _ = tx.send(current);
+            }
+            ListResult::Error => {}
+        }
+    });
 }
 
 pub struct AudioModule;

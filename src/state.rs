@@ -39,22 +39,13 @@ pub struct ModuleHealth {
 #[derive(Default, Clone)]
 pub struct AudioState {
     pub sink: AudioDeviceInfo,
-    pub source: AudioSourceInfo,
+    pub source: AudioDeviceInfo,
     pub available_sinks: Vec<String>,
     pub available_sources: Vec<String>,
 }
 
 #[derive(Default, Clone)]
 pub struct AudioDeviceInfo {
-    pub name: String,
-    pub description: String,
-    pub volume: u8,
-    pub muted: bool,
-    pub channels: u8,
-}
-
-#[derive(Default, Clone)]
-pub struct AudioSourceInfo {
     pub name: String,
     pub description: String,
     pub volume: u8,
