@@ -397,39 +397,27 @@ impl Config {
     /// Check if a module is enabled in the configuration.
     /// Returns false if the module is explicitly disabled; true if enabled or unknown.
     pub fn is_module_enabled(&self, module_name: &str) -> bool {
-        match module_name {
-            #[cfg(feature = "mod-network")]
-            "net" | "network" => self.network.enabled,
-            #[cfg(feature = "mod-hardware")]
-            "cpu" => self.cpu.enabled,
-            #[cfg(feature = "mod-hardware")]
-            "mem" | "memory" => self.memory.enabled,
-            #[cfg(feature = "mod-hardware")]
-            "gpu" => self.gpu.enabled,
-            #[cfg(feature = "mod-hardware")]
-            "sys" => self.sys.enabled,
-            #[cfg(feature = "mod-hardware")]
-            "disk" => self.disk.enabled,
-            #[cfg(feature = "mod-hardware")]
-            "pool" | "btrfs" => self.pool.enabled,
-            #[cfg(feature = "mod-hardware")]
-            "power" => self.power.enabled,
-            #[cfg(feature = "mod-hardware")]
-            "game" => self.game.enabled,
-            #[cfg(feature = "mod-audio")]
-            "vol" | "audio" | "mic" => self.audio.enabled,
-            #[cfg(feature = "mod-bt")]
-            "bt" | "bluetooth" => self.bt.enabled,
-            #[cfg(feature = "mod-dbus")]
-            "mpris" => self.mpris.enabled,
-            #[cfg(feature = "mod-dbus")]
-            "backlight" => self.backlight.enabled,
-            #[cfg(feature = "mod-dbus")]
-            "kbd" | "keyboard" => self.keyboard.enabled,
-            #[cfg(feature = "mod-dbus")]
-            "dnd" => self.dnd.enabled,
-            _ => true,
+        macro_rules! gen_enabled_match {
+            ($( { $feature:literal, $field:ident, $state:ty, [$($name:literal),+], [$($sig_name:literal),+], $module:path, $signal:ident, [$($default_arg:literal),*], $config:ident } )*) => {
+                match module_name {
+                    $(
+                        #[cfg(feature = $feature)]
+                        $($name)|+ => self.$config.enabled,
+                    )*
+                    // Dispatch-only modules (no watch channel)
+                    #[cfg(feature = "mod-audio")]
+                    "mic" => self.audio.enabled,
+                    #[cfg(feature = "mod-hardware")]
+                    "pool" | "btrfs" => self.pool.enabled,
+                    #[cfg(feature = "mod-hardware")]
+                    "power" => self.power.enabled,
+                    #[cfg(feature = "mod-hardware")]
+                    "game" => self.game.enabled,
+                    _ => true,
+                }
+            };
         }
+        for_each_watched_module!(gen_enabled_match)
     }
 
     pub fn validate(&self) {
