@@ -1,7 +1,16 @@
+//! Unified CPU/memory/sys/GPU/disk poller.
+//!
+//! CPU/memory/sys are sampled every fast tick (1 s). GPU polls every 5th fast
+//! tick via [`poll_slow`], and disks every 10th (they rarely change). GPU
+//! vendor is detected once by probing nvidia-smi / `/sys/class/drm/*`, then
+//! cached so subsequent polls take the fast path.
+
 use crate::state::{CpuState, DiskInfo, GpuState, MemoryState, SysState};
 use sysinfo::{Components, Disks, System};
 use tokio::sync::watch;
 
+/// Long-lived hardware sampler. Holds the `sysinfo::System` handle so
+/// successive refreshes can diff against prior samples.
 pub struct HardwareDaemon {
     sys: System,
     components: Components,
@@ -11,6 +20,7 @@ pub struct HardwareDaemon {
 }
 
 impl HardwareDaemon {
+    /// Build a new daemon with an initial `sysinfo` snapshot.
     pub fn new() -> Self {
         let mut sys = System::new();
         sys.refresh_cpu_usage();
@@ -21,10 +31,13 @@ impl HardwareDaemon {
             components,
             gpu_vendor: None,
             gpu_poll_counter: 0,
-            disk_poll_counter: 9, // Start at 9 to poll on the first tick
+            // Start at 9 so (counter + 1) % 10 == 0 on the first tick.
+            disk_poll_counter: 9,
         }
     }
 
+    /// Fast path: refresh CPU usage, memory, temperatures, load avg, uptime.
+    /// Called every daemon tick.
     pub async fn poll_fast(
         &mut self,
         cpu_tx: &watch::Sender<CpuState>,
@@ -96,12 +109,13 @@ impl HardwareDaemon {
         let _ = sys_tx.send(sys);
     }
 
+    /// Slow path: GPU every 5 ticks, disks every 10 ticks. Each sub-poll
+    /// runs off the hot loop before any state is published.
     pub async fn poll_slow(
         &mut self,
         gpu_tx: &watch::Sender<GpuState>,
         disks_tx: &watch::Sender<Vec<DiskInfo>>,
     ) {
-        // 1. Gather GPU data outside of lock
         let mut gpu_state = crate::state::GpuState::default();
         self.gpu_poll_counter = (self.gpu_poll_counter + 1) % 5;
         let should_poll_gpu = self.gpu_poll_counter == 0;
@@ -109,7 +123,6 @@ impl HardwareDaemon {
             self.poll_gpu(&mut gpu_state).await;
         }
 
-        // 2. Gather Disk data outside of lock
         let mut disks_data = None;
         self.disk_poll_counter = (self.disk_poll_counter + 1) % 10;
         if self.disk_poll_counter == 0 {
@@ -130,7 +143,6 @@ impl HardwareDaemon {
             );
         }
 
-        // 3. Apply to state
         if should_poll_gpu {
             let _ = gpu_tx.send(gpu_state);
         }
@@ -140,6 +152,7 @@ impl HardwareDaemon {
         }
     }
 
+    /// Dispatch to the cached vendor's probe, or run detection on first call.
     async fn poll_gpu(&mut self, gpu: &mut crate::state::GpuState) {
         gpu.active = false;
 
@@ -154,7 +167,7 @@ impl HardwareDaemon {
                 Self::poll_intel(gpu);
             }
             _ => {
-                // Detection pass: try each vendor, cache the first that responds.
+                // First run — probe each vendor and cache the first hit.
                 Self::poll_nvidia(gpu).await;
                 if gpu.active {
                     self.gpu_vendor = Some("NVIDIA".to_string());
@@ -173,6 +186,7 @@ impl HardwareDaemon {
         }
     }
 
+    /// Shell out to `nvidia-smi --query-gpu=...` for utilization/VRAM/temp.
     async fn poll_nvidia(gpu: &mut crate::state::GpuState) {
         let Ok(output) = tokio::process::Command::new("nvidia-smi")
             .args([
@@ -202,6 +216,7 @@ impl HardwareDaemon {
         }
     }
 
+    /// Read amdgpu sysfs entries under `/sys/class/drm/card*/device`.
     fn poll_amd(gpu: &mut crate::state::GpuState) {
         for i in 0..=3 {
             let base = format!("/sys/class/drm/card{}/device", i);
@@ -238,6 +253,8 @@ impl HardwareDaemon {
         }
     }
 
+    /// Read i915/xe sysfs `gt_cur_freq_mhz`; approximate "usage" as
+    /// current/max frequency since Intel has no direct utilization counter.
     fn poll_intel(gpu: &mut crate::state::GpuState) {
         for i in 0..=3 {
             let base = format!("/sys/class/drm/card{}/device", i);

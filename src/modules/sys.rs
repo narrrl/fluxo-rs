@@ -1,3 +1,5 @@
+//! Uptime + load average renderer. Reads from the `sys` watch channel.
+
 use crate::config::Config;
 use crate::error::Result;
 use crate::modules::WaybarModule;
@@ -5,6 +7,7 @@ use crate::output::WaybarOutput;
 use crate::state::AppReceivers;
 use crate::utils::{TokenValue, format_template};
 
+/// Renders uptime and load averages with a detailed tooltip.
 pub struct SysModule;
 
 impl WaybarModule for SysModule {

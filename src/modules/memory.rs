@@ -1,3 +1,5 @@
+//! RAM usage renderer. Reads from the `memory` watch channel.
+
 use crate::config::Config;
 use crate::error::Result;
 use crate::modules::WaybarModule;
@@ -5,6 +7,7 @@ use crate::output::WaybarOutput;
 use crate::state::AppReceivers;
 use crate::utils::{TokenValue, classify_usage, format_template};
 
+/// Renders used/total GB with usage classification for Waybar CSS.
 pub struct MemoryModule;
 
 impl WaybarModule for MemoryModule {

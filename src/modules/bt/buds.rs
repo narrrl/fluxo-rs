@@ -1,3 +1,6 @@
+//! Per-device BT plugin trait + PixelBuds Pro implementation on top of the
+//! Maestro GATT connection.
+
 use crate::config::Config;
 use crate::error::{FluxoError, Result as FluxoResult};
 use crate::modules::bt::maestro::BudsCommand;
@@ -5,29 +8,38 @@ use crate::state::AppReceivers;
 use crate::utils::TokenValue;
 use futures::future::BoxFuture;
 
+/// A device-specific adapter that can enrich [`BtState`](crate::state::BtState)
+/// with extra metadata and expose control actions (modes).
 pub trait BtPlugin: Send + Sync {
+    /// Plugin identifier used for logging.
     fn name(&self) -> &str;
+    /// Return true if this plugin handles a device with `alias`/`mac`.
     fn can_handle(&self, alias: &str, mac: &str) -> bool;
+    /// Return `(token_name, value)` pairs merged into the rendered template.
     fn get_data(
         &self,
         config: &Config,
         state: &AppReceivers,
         mac: &str,
     ) -> BoxFuture<'static, FluxoResult<Vec<(String, TokenValue)>>>;
+    /// List of mode identifiers the plugin can switch between.
     fn get_modes(
         &self,
         mac: &str,
         state: &AppReceivers,
     ) -> BoxFuture<'static, FluxoResult<Vec<String>>>;
+    /// Switch device to `mode` (must be one returned by `get_modes`).
     fn set_mode(
         &self,
         mode: &str,
         mac: &str,
         state: &AppReceivers,
     ) -> BoxFuture<'static, FluxoResult<()>>;
+    /// Advance to the next mode in the list (wraps around).
     fn cycle_mode(&self, mac: &str, state: &AppReceivers) -> BoxFuture<'static, FluxoResult<()>>;
 }
 
+/// Google Pixel Buds Pro plugin. Reads battery + ANC state via Maestro GATT.
 pub struct PixelBudsPlugin;
 
 impl BtPlugin for PixelBudsPlugin {

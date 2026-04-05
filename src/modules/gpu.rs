@@ -1,3 +1,6 @@
+//! GPU renderer. Picks a vendor-specific format string (AMD/Intel/NVIDIA) and
+//! reads from the `gpu` watch channel.
+
 use crate::config::Config;
 use crate::error::Result;
 use crate::modules::WaybarModule;
@@ -5,6 +8,7 @@ use crate::output::WaybarOutput;
 use crate::state::AppReceivers;
 use crate::utils::{TokenValue, classify_usage, format_template};
 
+/// Renders GPU usage / VRAM / temp using the per-vendor format from config.
 pub struct GpuModule;
 
 impl WaybarModule for GpuModule {

@@ -1,3 +1,11 @@
+//! Google Maestro (PixelBuds GATT) integration.
+//!
+//! Each connected device gets its own [`buds_task`] running on a dedicated
+//! single-threaded runtime. The task opens an RFCOMM channel, speaks the
+//! Maestro protocol to read battery + ANC state, and listens for settings
+//! changes. External callers interact via [`MaestroManager::send_command`]
+//! and [`MaestroManager::get_status`].
+
 use crate::state::AppReceivers;
 use anyhow::{Context, Result};
 use futures::StreamExt;
@@ -7,12 +15,12 @@ use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
 
-// Maestro imports
 use maestro::protocol::codec::Codec;
 use maestro::pwrpc::client::Client;
 use maestro::service::MaestroService;
 use maestro::service::settings::{self, SettingValue};
 
+/// Cached per-device snapshot returned to BT plugin consumers.
 #[derive(Clone, Default)]
 pub struct BudsStatus {
     pub left_battery: Option<u8>,
@@ -24,28 +32,35 @@ pub struct BudsStatus {
     pub error: Option<String>,
 }
 
+/// Command that can be issued against a connected buds device.
 pub enum BudsCommand {
+    /// Set the ANC mode: `active`, `aware`, or `off`.
     SetAnc(String),
 }
 
+/// Messages sent to the [`MaestroManager`] control thread.
 pub enum ManagerCommand {
+    /// Ensure a [`buds_task`] is running for `mac`; spawn if absent.
     EnsureTask(String),
+    /// Forward a [`BudsCommand`] to the task for `mac`.
     SendCommand(String, BudsCommand),
 }
 
+/// Owns all buds-task lifetimes and a shared status cache.
 pub struct MaestroManager {
     statuses: Arc<Mutex<HashMap<String, BudsStatus>>>,
     management_tx: mpsc::UnboundedSender<ManagerCommand>,
 }
 
 impl MaestroManager {
+    /// Spawn the management thread + runtime and return a handle.
     pub fn new(state: AppReceivers) -> Self {
         let (tx, mut rx) = mpsc::unbounded_channel::<ManagerCommand>();
         let statuses = Arc::new(Mutex::new(HashMap::new()));
         let statuses_clone = Arc::clone(&statuses);
         let state_clone = state.clone();
 
-        // Start dedicated BT management thread
+        // Dedicated thread — bluer uses per-thread local tasks.
         std::thread::spawn(move || {
             let rt = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
@@ -85,7 +100,7 @@ impl MaestroManager {
                             }
                         }
                         _ = tokio::time::sleep(Duration::from_millis(100)) => {
-                            // Cleanup dropped tasks if needed
+                            // Wake tick: future hook for task-lifecycle cleanup.
                         }
                     }
                 }
@@ -98,17 +113,20 @@ impl MaestroManager {
         }
     }
 
+    /// Return the cached [`BudsStatus`] for `mac` (default if absent).
     pub fn get_status(&self, mac: &str) -> BudsStatus {
         let statuses = self.statuses.lock().unwrap();
         statuses.get(mac).cloned().unwrap_or_default()
     }
 
+    /// Request that a buds task be running for `mac`. Idempotent.
     pub fn ensure_task(&self, mac: &str) {
         let _ = self
             .management_tx
             .send(ManagerCommand::EnsureTask(mac.to_string()));
     }
 
+    /// Ensure a task exists and forward `cmd` to it.
     pub fn send_command(&self, mac: &str, cmd: BudsCommand) -> Result<()> {
         self.ensure_task(mac);
         let _ = self
@@ -118,6 +136,8 @@ impl MaestroManager {
     }
 }
 
+/// Per-device async task: opens RFCOMM, runs the Maestro codec, mirrors
+/// battery/ANC state into the shared status map, and consumes commands.
 async fn buds_task(
     mac: &str,
     statuses: Arc<Mutex<HashMap<String, BudsStatus>>>,
@@ -150,7 +170,7 @@ async fn buds_task(
             break;
         }
 
-        // Connect to Maestro RFCOMM service
+        // Maestro historically listens on channel 1 or 2 — probe both.
         let mut stream = None;
         for channel in [1, 2] {
             let socket = match bluer::rfcomm::Socket::new() {
@@ -190,13 +210,11 @@ async fn buds_task(
 
         info!("Connected Maestro RFCOMM to {} on channel", mac);
 
-        // Initialize Maestro communication stack
         let codec = Codec::new();
         let stream = codec.wrap(stream);
         let mut client = Client::new(stream);
         let handle = client.handle();
 
-        // Resolve Maestro channel
         let channel = match maestro::protocol::utils::resolve_channel(&mut client).await {
             Ok(c) => c,
             Err(e) => {
@@ -213,7 +231,7 @@ async fn buds_task(
 
         let mut service = MaestroService::new(handle, channel);
 
-        // Update health
+        // Successful connect — clear health backoff for bt.buds.
         {
             let mut lock = state.health.write().await;
             let health = lock.entry("bt.buds".to_string()).or_default();
@@ -221,7 +239,6 @@ async fn buds_task(
             health.backoff_until = None;
         }
 
-        // Query initial ANC state
         if let Ok(val) = service
             .read_setting_var(settings::SettingId::CurrentAncrState)
             .await
@@ -337,6 +354,7 @@ async fn buds_task(
     Ok(())
 }
 
+/// String ("active"/"aware"/"off") → Maestro enum; unknown falls back to `Off`.
 fn mode_to_anc_state(mode: &str) -> settings::AncState {
     match mode {
         "active" => settings::AncState::Active,
@@ -346,6 +364,7 @@ fn mode_to_anc_state(mode: &str) -> settings::AncState {
     }
 }
 
+/// Inverse of [`mode_to_anc_state`] for status readout.
 pub fn anc_state_to_string(state: &settings::AncState) -> String {
     match state {
         settings::AncState::Active => "active".to_string(),
@@ -357,6 +376,7 @@ pub fn anc_state_to_string(state: &settings::AncState) -> String {
 
 static MAESTRO: OnceLock<MaestroManager> = OnceLock::new();
 
+/// Lazily initialise the process-wide [`MaestroManager`] and return a reference.
 pub fn get_maestro(state: &AppReceivers) -> &MaestroManager {
     MAESTRO.get_or_init(|| MaestroManager::new(state.clone()))
 }

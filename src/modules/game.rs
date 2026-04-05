@@ -1,3 +1,6 @@
+//! Gamemode indicator. Queries Hyprland's animation setting over its IPC
+//! socket; animations disabled => gamemode active. Dispatch-only.
+
 use crate::config::Config;
 use crate::error::Result;
 use crate::modules::WaybarModule;
@@ -6,6 +9,7 @@ use crate::state::AppReceivers;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::UnixStream;
 
+/// Renders a glyph depending on whether Hyprland animations are disabled.
 pub struct GameModule;
 
 impl WaybarModule for GameModule {
@@ -38,6 +42,7 @@ impl WaybarModule for GameModule {
     }
 }
 
+/// Send `cmd` to Hyprland's `.socket.sock` and return the response body.
 async fn hyprland_ipc(cmd: &str) -> Result<String> {
     let path = crate::utils::get_hyprland_socket(".socket.sock")?;
 

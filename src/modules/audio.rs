@@ -1,3 +1,10 @@
+//! PulseAudio/PipeWire sink + source indicator with live event subscription.
+//!
+//! The daemon runs on its own OS thread because libpulse's threaded mainloop
+//! must drive callbacks inside its own lock scope. Volume/mute changes are
+//! routed back via an async [`mpsc`] channel — the module handlers [`run`]s
+//! only push commands; the thread performs the actual libpulse calls.
+
 use crate::config::Config;
 use crate::error::{FluxoError, Result};
 use crate::modules::WaybarModule;
@@ -13,6 +20,7 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, watch};
 use tracing::error;
 
+/// Commands the module handler sends to the audio daemon thread.
 pub enum AudioCommand {
     ChangeVolume {
         is_sink: bool,
@@ -27,13 +35,17 @@ pub enum AudioCommand {
     },
 }
 
+/// Long-lived daemon driving libpulse's threaded mainloop.
 pub struct AudioDaemon;
 
 impl AudioDaemon {
+    /// Construct a new (stateless) daemon.
     pub fn new() -> Self {
         Self
     }
 
+    /// Spawn the audio thread, subscribe to sink/source/server events, and
+    /// start consuming [`AudioCommand`]s.
     pub fn start(
         &self,
         state_tx: &watch::Sender<AudioState>,
@@ -56,7 +68,6 @@ impl AudioDaemon {
 
             mainloop.lock();
 
-            // Wait for context to be ready
             loop {
                 match context.get_state() {
                     libpulse_binding::context::State::Ready => break,
@@ -74,10 +85,8 @@ impl AudioDaemon {
                 }
             }
 
-            // Initial fetch
             let _ = fetch_audio_data_sync(&mut context, &state_tx);
 
-            // Subscribe to events
             let interest =
                 InterestMaskSet::SINK | InterestMaskSet::SOURCE | InterestMaskSet::SERVER;
             context.subscribe(interest, |_| {});
@@ -196,7 +205,6 @@ impl AudioDaemon {
 
                 mainloop.lock();
 
-                // Fetch data and update available sinks/sources
                 let _ = fetch_audio_data_sync(&mut context, &state_tx);
 
                 mainloop.unlock();
@@ -207,13 +215,12 @@ impl AudioDaemon {
 
 use std::time::Duration;
 
+/// Trigger async libpulse introspection: server defaults + sink/source lists.
+/// Callbacks publish onto `state_tx` as results land.
 fn fetch_audio_data_sync(
     context: &mut Context,
     state_tx: &watch::Sender<AudioState>,
 ) -> Result<()> {
-    // We fetch all sinks and sources, and also server info to know defaults.
-    // The order doesn't strictly matter as long as we update correctly.
-
     let tx_server = state_tx.clone();
     context.introspect().get_server_info(move |info| {
         let mut current = tx_server.borrow().clone();
@@ -269,6 +276,8 @@ fn device_info_from(
     (desc, vol, muted, channels)
 }
 
+/// Write `info` into `target` only when `item_name` matches the currently
+/// selected default device — other sinks/sources are ignored here.
 fn apply_device_info(target: &mut AudioDeviceInfo, item_name: &str, info: (String, u8, bool, u8)) {
     if item_name == target.name {
         target.description = info.0;
@@ -278,6 +287,7 @@ fn apply_device_info(target: &mut AudioDeviceInfo, item_name: &str, info: (Strin
     }
 }
 
+/// Dispatch `get_sink_info_list` and collect names into `available_sinks`.
 fn fetch_sinks(context: &mut Context, state_tx: &watch::Sender<AudioState>) {
     let tx = state_tx.clone();
     let pending = PendingList::new();
@@ -313,6 +323,8 @@ fn fetch_sinks(context: &mut Context, state_tx: &watch::Sender<AudioState>) {
     });
 }
 
+/// Dispatch `get_source_info_list` and collect names (skipping `.monitor`
+/// virtual sources) into `available_sources`.
 fn fetch_sources(context: &mut Context, state_tx: &watch::Sender<AudioState>) {
     let tx = state_tx.clone();
     let pending = PendingList::new();
@@ -348,6 +360,8 @@ fn fetch_sources(context: &mut Context, state_tx: &watch::Sender<AudioState>) {
     });
 }
 
+/// Renders sink/source + dispatches volume/mute/cycle commands.
+/// Args: `[sink|source] [show|up|down|mute|cycle] [step]`.
 pub struct AudioModule;
 
 impl WaybarModule for AudioModule {
@@ -413,7 +427,6 @@ impl AudioModule {
         };
 
         if name.is_empty() {
-            // Fallback if daemon hasn't populated state yet
             return Ok(WaybarOutput {
                 text: "Audio Loading...".to_string(),
                 ..Default::default()

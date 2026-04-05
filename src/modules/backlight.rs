@@ -1,3 +1,7 @@
+//! Screen backlight indicator, driven by `inotify` on
+//! `/sys/class/backlight/*/actual_brightness`. Falls back to a 5 s poll loop
+//! to catch any missed events.
+
 use crate::config::Config;
 use crate::error::Result;
 use crate::modules::WaybarModule;
@@ -11,6 +15,7 @@ use std::time::Duration;
 use tokio::sync::watch;
 use tracing::{error, info};
 
+/// Renders the brightness percentage with a vendor-agnostic icon bucket.
 pub struct BacklightModule;
 
 impl WaybarModule for BacklightModule {
@@ -47,13 +52,16 @@ impl WaybarModule for BacklightModule {
     }
 }
 
+/// Background `inotify` watcher thread for the sysfs backlight file.
 pub struct BacklightDaemon;
 
 impl BacklightDaemon {
+    /// Construct a new (stateless) daemon.
     pub fn new() -> Self {
         Self
     }
 
+    /// Spawn an OS thread that publishes brightness changes onto `tx`.
     pub fn start(&self, tx: watch::Sender<BacklightState>) {
         std::thread::spawn(move || {
             let base_dir = PathBuf::from("/sys/class/backlight");
@@ -105,12 +113,10 @@ impl BacklightDaemon {
                 }
             };
 
-            // Initial poll
             let _ = tx.send(BacklightState {
                 percentage: get_percentage(),
             });
 
-            // Set up notify watcher
             let (ev_tx, ev_rx) = mpsc::channel();
             let mut watcher = RecommendedWatcher::new(
                 move |res: notify::Result<Event>| {
@@ -130,9 +136,8 @@ impl BacklightDaemon {
             }
 
             loop {
-                // Block until an event occurs or a timeout to catch missed events
                 if ev_rx.recv_timeout(Duration::from_secs(5)).is_ok() {
-                    // Debounce rapid events
+                    // Debounce bursts from scroll-driven brightness changes.
                     std::thread::sleep(Duration::from_millis(50));
                     while ev_rx.try_recv().is_ok() {}
 
@@ -140,7 +145,7 @@ impl BacklightDaemon {
                         percentage: get_percentage(),
                     });
                 } else {
-                    // Timeout hit, poll just in case
+                    // Timeout reached — resync in case an event was missed.
                     let current = get_percentage();
                     if tx.borrow().percentage != current {
                         let _ = tx.send(BacklightState {

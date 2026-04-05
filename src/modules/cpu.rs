@@ -1,3 +1,5 @@
+//! CPU usage + temperature renderer. Reads from the `cpu` watch channel.
+
 use crate::config::Config;
 use crate::error::Result;
 use crate::modules::WaybarModule;
@@ -5,6 +7,7 @@ use crate::output::WaybarOutput;
 use crate::state::AppReceivers;
 use crate::utils::{TokenValue, classify_usage, format_template};
 
+/// Renders CPU usage/temp using [`CpuConfig::format`](crate::config::CpuConfig).
 pub struct CpuModule;
 
 impl WaybarModule for CpuModule {

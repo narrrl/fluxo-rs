@@ -1,3 +1,9 @@
+//! Do-Not-Disturb toggle + status for SwayNC or Dunst.
+//!
+//! SwayNC exposes a `dnd` property on its `org.erikreider.swaync.control`
+//! interface that fires PropertiesChanged signals, so we subscribe. Dunst has
+//! no change signal for its `paused` property, so we fall back to a 2 s poll.
+
 use crate::config::Config;
 use crate::error::Result;
 use crate::modules::WaybarModule;
@@ -11,6 +17,7 @@ use zbus::proxy;
 use zbus::zvariant::OwnedValue;
 use zbus::{Connection, fdo::PropertiesProxy};
 
+/// Renders + toggles DND state. Args: `["show"]` (default) or `["toggle"]`.
 pub struct DndModule;
 
 /// Read dunst's `paused` property via raw D-Bus call.
@@ -61,7 +68,6 @@ impl WaybarModule for DndModule {
                         message: format!("DBus connection failed: {}", e),
                     })?;
 
-            // Try SwayNC
             if let Ok(proxy) = SwayncControlProxy::new(&connection).await
                 && let Ok(is_dnd) = proxy.dnd().await
             {
@@ -69,7 +75,6 @@ impl WaybarModule for DndModule {
                 return Ok(WaybarOutput::default());
             }
 
-            // Try Dunst via raw D-Bus
             if let Ok(is_paused) = dunst_get_paused(&connection).await {
                 let _ = dunst_set_paused(&connection, !is_paused).await;
                 return Ok(WaybarOutput::default());
@@ -101,6 +106,8 @@ impl WaybarModule for DndModule {
     }
 }
 
+/// Background watcher that keeps [`DndState`] in sync with the active
+/// notification daemon (SwayNC via signals, Dunst via polling).
 pub struct DndDaemon;
 
 #[proxy(
@@ -116,10 +123,12 @@ trait SwayncControl {
 }
 
 impl DndDaemon {
+    /// Construct a new (stateless) daemon.
     pub fn new() -> Self {
         Self
     }
 
+    /// Spawn a supervised listen loop that reconnects with a 5 s backoff.
     pub fn start(&self, tx: watch::Sender<DndState>) {
         tokio::spawn(async move {
             loop {
@@ -136,7 +145,6 @@ impl DndDaemon {
 
         info!("Connected to D-Bus for DND monitoring");
 
-        // Try SwayNC first (signal-based)
         if let Ok(proxy) = SwayncControlProxy::new(&connection).await
             && let Ok(is_dnd) = proxy.dnd().await
         {
@@ -164,7 +172,8 @@ impl DndDaemon {
             return Err(anyhow::anyhow!("SwayNC DND stream ended"));
         }
 
-        // Try Dunst via raw D-Bus calls (bypasses zbus proxy issues)
+        // Dunst: raw D-Bus call avoids zbus proxy typing quirks with its
+        // non-standard `org.dunstproject.cmd0` interface.
         match dunst_get_paused(&connection).await {
             Ok(is_paused) => {
                 info!("Found Dunst, using polling-based DND monitoring");

@@ -1,3 +1,5 @@
+//! Filesystem usage renderer. Args: `[mountpoint]` (default `/`).
+
 use crate::config::Config;
 use crate::error::{FluxoError, Result};
 use crate::modules::WaybarModule;
@@ -5,6 +7,8 @@ use crate::output::WaybarOutput;
 use crate::state::AppReceivers;
 use crate::utils::{TokenValue, classify_usage, format_template};
 
+/// Renders used/total for a given mount point. Returns [`FluxoError::Module`]
+/// if the mount point isn't present in the current disk snapshot.
 pub struct DiskModule;
 
 impl WaybarModule for DiskModule {

@@ -1,3 +1,10 @@
+//! Primary-interface throughput renderer + polling daemon.
+//!
+//! The daemon picks the interface with the longest-prefix default route (see
+//! [`get_primary_interface`]) and computes rx/tx rates as byte-count deltas
+//! between successive polls. Well-known VPN interface prefixes get a lock
+//! glyph prepended to the rendered text.
+
 use crate::config::Config;
 use crate::error::Result;
 use crate::modules::WaybarModule;
@@ -9,8 +16,10 @@ use std::fs;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::watch;
 
+/// Renders interface / IP / rx / tx for the detected primary route.
 pub struct NetworkModule;
 
+/// Background poller that tracks byte counters across ticks to derive rates.
 pub struct NetworkDaemon {
     last_time: u64,
     last_rx_bytes: u64,
@@ -22,6 +31,7 @@ pub struct NetworkDaemon {
 type PollResult = crate::error::Result<(String, Option<String>, Option<(u64, u64)>)>;
 
 impl NetworkDaemon {
+    /// Build a fresh daemon with no prior byte-count samples.
     pub fn new() -> Self {
         Self {
             last_time: 0,
@@ -32,6 +42,9 @@ impl NetworkDaemon {
         }
     }
 
+    /// Detect the primary interface, read `/sys/class/net/*/statistics`, and
+    /// publish a new [`NetworkState`] onto `state_tx`. Interface/byte reads
+    /// run via [`tokio::task::spawn_blocking`] so the runtime isn't starved.
     pub async fn poll(
         &mut self,
         state_tx: &watch::Sender<NetworkState>,
@@ -56,7 +69,6 @@ impl NetworkDaemon {
         } else {
             self.cached_interface = None;
             self.cached_ip = None;
-            // Provide a default state for "No connection"
             let mut network = state_tx.borrow().clone();
             network.interface.clear();
             network.ip.clear();
@@ -71,7 +83,6 @@ impl NetworkDaemon {
         let interface = if let Some(ref interface) = self.cached_interface {
             interface.clone()
         } else {
-            // No interface detected
             let mut network = state_tx.borrow().clone();
             network.interface.clear();
             network.ip.clear();
@@ -107,7 +118,7 @@ impl NetworkDaemon {
                 network.ip = self.cached_ip.clone().unwrap_or_default();
                 let _ = state_tx.send(network);
             } else {
-                // First poll: no speed data yet, but update interface/ip
+                // First poll has no prior sample — publish iface/ip only.
                 let mut network = state_tx.borrow().clone();
                 network.interface = interface.clone();
                 network.ip = self.cached_ip.clone().unwrap_or_default();
@@ -118,7 +129,6 @@ impl NetworkDaemon {
             self.last_rx_bytes = rx_bytes_now;
             self.last_tx_bytes = tx_bytes_now;
         } else {
-            // Read failed, might be down
             self.cached_interface = None;
             return Err(crate::error::FluxoError::Network(format!(
                 "Failed to read bytes for {}",
@@ -182,6 +192,8 @@ impl WaybarModule for NetworkModule {
     }
 }
 
+/// Parse `/proc/net/route` to find the default-route interface. When several
+/// defaults exist, prefer the one with the longest netmask, then lowest metric.
 fn get_primary_interface() -> Result<String> {
     let content = std::fs::read_to_string("/proc/net/route")?;
 
@@ -200,7 +212,6 @@ fn get_primary_interface() -> Result<String> {
         }
     }
 
-    // Sort by mask descending (longest prefix match first), then by metric ascending
     defaults.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
     if let Some((_, _, dev)) = defaults.first() {
         Ok(dev.clone())
@@ -209,6 +220,7 @@ fn get_primary_interface() -> Result<String> {
     }
 }
 
+/// First IPv4 address for `interface`, via `getifaddrs`. `None` if absent.
 fn get_ip_address(interface: &str) -> Option<String> {
     let addrs = getifaddrs().ok()?;
     for ifaddr in addrs {
@@ -222,6 +234,7 @@ fn get_ip_address(interface: &str) -> Option<String> {
     None
 }
 
+/// Read `(rx_bytes, tx_bytes)` counters from sysfs for `interface`.
 fn get_bytes(interface: &str) -> Result<(u64, u64)> {
     let rx_path = format!("/sys/class/net/{}/statistics/rx_bytes", interface);
     let tx_path = format!("/sys/class/net/{}/statistics/tx_bytes", interface);

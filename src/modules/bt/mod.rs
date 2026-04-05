@@ -1,3 +1,11 @@
+//! Bluetooth indicator + control (BlueZ via `bluer`).
+//!
+//! Core loop: filter paired+connected audio-sink devices, enrich them via
+//! per-device [`BtPlugin`]s (currently PixelBuds via the Maestro GATT
+//! protocol), and publish the result as [`BtState`]. The module handler
+//! exposes `connect`, `disconnect`, `cycle`, `menu_data`, `get_modes`,
+//! `set_mode`, `cycle_mode` actions for the Waybar menu.
+
 pub mod buds;
 pub mod maestro;
 
@@ -14,15 +22,18 @@ use tracing::{error, warn};
 
 use self::buds::{BtPlugin, PixelBudsPlugin};
 
+/// Background poller that syncs connected BlueZ devices into [`BtState`].
 pub struct BtDaemon {
     session: Option<bluer::Session>,
 }
 
 impl BtDaemon {
+    /// Construct a new daemon. The BlueZ session is lazily created on first poll.
     pub fn new() -> Self {
         Self { session: None }
     }
 
+    /// Poll wrapper that logs + swallows errors so the outer loop keeps running.
     pub async fn poll(
         &mut self,
         tx: &watch::Sender<BtState>,
@@ -113,6 +124,8 @@ impl BtDaemon {
 static PLUGINS: LazyLock<Vec<Box<dyn BtPlugin>>> =
     LazyLock::new(|| vec![Box::new(PixelBudsPlugin)]);
 
+/// After a user-initiated connect/disconnect, schedule a staircase of
+/// forced polls so the UI catches up even if BlueZ is slow to settle.
 fn trigger_robust_poll(state: AppReceivers) {
     tokio::spawn(async move {
         for delay in [200, 500, 1000, 2000, 3000] {
@@ -142,6 +155,7 @@ fn find_device<'a>(bt_state: &'a BtState, mac: &str) -> Option<&'a BtDeviceInfo>
     bt_state.devices.iter().find(|d| d.device_address == mac)
 }
 
+/// Renders the current BT status + handles control actions.
 pub struct BtModule;
 
 impl WaybarModule for BtModule {
@@ -194,7 +208,6 @@ impl WaybarModule for BtModule {
             "menu_data" => {
                 let mut lines = Vec::new();
 
-                // Connected devices
                 for dev in &bt_state.devices {
                     lines.push(format!(
                         "CONNECTED:{}|{}",
@@ -202,7 +215,7 @@ impl WaybarModule for BtModule {
                     ));
                 }
 
-                // Paired-but-not-connected devices
+                // Also surface paired-but-not-connected devices for the menu.
                 if let Ok(session) = bluer::Session::new().await
                     && let Ok(adapter) = session.default_adapter().await
                     && let Ok(addresses) = adapter.device_addresses().await
@@ -286,7 +299,6 @@ impl WaybarModule for BtModule {
             _ => {}
         }
 
-        // "show" and fallthrough
         if !bt_state.adapter_powered {
             return Ok(WaybarOutput {
                 text: config.bt.format_disabled.clone(),

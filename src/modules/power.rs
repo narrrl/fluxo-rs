@@ -1,3 +1,6 @@
+//! Battery/AC indicator via `/sys/class/power_supply`. Dispatch-only - reads
+//! sysfs on demand rather than polling into a watch channel.
+
 use crate::config::Config;
 use crate::error::Result;
 use crate::modules::WaybarModule;
@@ -6,6 +9,7 @@ use crate::state::AppReceivers;
 use crate::utils::{TokenValue, format_template};
 use std::fs;
 
+/// Renders battery percentage + charge state (critical/warning/bat/charging/ac).
 pub struct PowerModule;
 
 impl WaybarModule for PowerModule {
@@ -18,7 +22,6 @@ impl WaybarModule for PowerModule {
         let critical_threshold = 15;
         let warning_threshold = 50;
 
-        // Find the first battery
         let mut battery_path = None;
         if let Ok(entries) = fs::read_dir("/sys/class/power_supply") {
             for entry in entries.flatten() {
@@ -30,7 +33,6 @@ impl WaybarModule for PowerModule {
             }
         }
 
-        // Check AC status
         let mut ac_online = false;
         if let Ok(entries) = fs::read_dir("/sys/class/power_supply") {
             for entry in entries.flatten() {

@@ -1,3 +1,6 @@
+//! Btrfs pool renderer: sums usage across all btrfs-typed mounts seen in the
+//! `disks` watch channel. Dispatch-only (no dedicated poll task).
+
 use crate::config::Config;
 use crate::error::Result;
 use crate::modules::WaybarModule;
@@ -5,6 +8,8 @@ use crate::output::WaybarOutput;
 use crate::state::AppReceivers;
 use crate::utils::{TokenValue, classify_usage, format_template};
 
+/// Aggregates used/total across every mount whose filesystem name contains
+/// `btrfs`. Emits `No BTRFS` when none are present.
 pub struct BtrfsModule;
 
 impl WaybarModule for BtrfsModule {

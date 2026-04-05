@@ -1,3 +1,11 @@
+//! MPRIS media player indicator.
+//!
+//! Subscribes to `PlaybackStatus` and `Metadata` property-changed streams on
+//! the first `org.mpris.MediaPlayer2.*` name that appears on the session bus,
+//! so the indicator is truly signal-driven (no 2 s polling). A 10 s heartbeat
+//! verifies the player is still there. Optional marquee scrolling is driven
+//! by [`mpris_scroll_ticker`] from [`crate::daemon`].
+
 use crate::config::Config;
 use crate::error::Result;
 use crate::modules::WaybarModule;
@@ -10,6 +18,7 @@ use tokio::time::Duration;
 use tracing::{debug, info};
 use zbus::{Connection, proxy};
 
+/// Render the user's format string + derive the Waybar CSS class from state.
 fn format_mpris_text(format: &str, mpris: &MprisState) -> (String, &'static str) {
     let status_icon = if mpris.is_playing {
         "󰏤"
@@ -40,6 +49,7 @@ fn format_mpris_text(format: &str, mpris: &MprisState) -> (String, &'static str)
     (text, class)
 }
 
+/// Return a cyclic `max_len`-wide window over `full_text + separator`.
 fn apply_scroll_window(full_text: &str, max_len: usize, offset: usize, separator: &str) -> String {
     let char_count = full_text.chars().count();
     let total_len = char_count + separator.chars().count();
@@ -53,6 +63,7 @@ fn apply_scroll_window(full_text: &str, max_len: usize, offset: usize, separator
         .collect()
 }
 
+/// Truncate `text` to `max_len` chars, appending `...` when cut.
 fn truncate_with_ellipsis(text: &str, max_len: usize) -> String {
     let char_count = text.chars().count();
     if char_count <= max_len {
@@ -62,6 +73,7 @@ fn truncate_with_ellipsis(text: &str, max_len: usize) -> String {
     format!("{}...", truncated)
 }
 
+/// Renders the current player state, applying scroll/truncate per config.
 pub struct MprisModule;
 
 impl WaybarModule for MprisModule {
@@ -111,6 +123,9 @@ impl WaybarModule for MprisModule {
     }
 }
 
+/// Drive the marquee animation: advance the offset every `scroll_speed` ms
+/// while a track is playing, and emit a fresh generation on `tick_tx` so the
+/// mpris signaler arm fires. Resets offset when the track changes.
 pub async fn mpris_scroll_ticker(
     config: Arc<RwLock<Config>>,
     mut mpris_rx: watch::Receiver<MprisState>,
@@ -152,13 +167,15 @@ pub async fn mpris_scroll_ticker(
             continue;
         }
 
-        // Not scrolling — wait for next state change
+        // Not scrolling — sleep until the next player state change.
         if mpris_rx.changed().await.is_err() {
             break;
         }
     }
 }
 
+/// Background watcher that discovers the active MPRIS player and mirrors
+/// its `PlaybackStatus` + `Metadata` properties into [`MprisState`].
 pub struct MprisDaemon;
 
 #[proxy(
@@ -185,10 +202,12 @@ trait MprisPlayer {
 }
 
 impl MprisDaemon {
+    /// Construct a new (stateless) daemon.
     pub fn new() -> Self {
         Self
     }
 
+    /// Spawn a supervised listen loop with a 5 s reconnect backoff.
     pub fn start(&self, tx: watch::Sender<MprisState>) {
         tokio::spawn(async move {
             loop {
@@ -209,7 +228,6 @@ impl MprisDaemon {
         let dbus_proxy = DBusProxy::new(&connection).await?;
 
         loop {
-            // Discovery pass: find an active MPRIS player.
             let names = dbus_proxy.list_names().await?;
             let active_player = names
                 .into_iter()
@@ -217,7 +235,6 @@ impl MprisDaemon {
 
             let Some(player_name) = active_player else {
                 send_stopped_if_changed(tx);
-                // No player — wait and re-discover.
                 tokio::time::sleep(Duration::from_secs(5)).await;
                 continue;
             };
@@ -234,7 +251,6 @@ impl MprisDaemon {
                 }
             };
 
-            // Initial fetch and then signal-driven updates via PropertiesChanged.
             update_from_player(&player_proxy, tx).await;
 
             let mut status_stream = player_proxy.receive_playback_status_changed().await;
@@ -249,7 +265,7 @@ impl MprisDaemon {
                         update_from_player(&player_proxy, tx).await;
                     }
                     _ = tokio::time::sleep(Duration::from_secs(10)) => {
-                        // Heartbeat: verify the player is still on the bus.
+                        // Heartbeat: re-check that the player name is still owned.
                         let current = dbus_proxy.list_names().await.unwrap_or_default();
                         if !current.iter().any(|n| n == &player_name) {
                             break;
@@ -261,6 +277,8 @@ impl MprisDaemon {
     }
 }
 
+/// Fetch `PlaybackStatus` + `Metadata` and publish only when they differ
+/// from the previous [`MprisState`] (to avoid spurious watch wake-ups).
 async fn update_from_player(player: &MprisPlayerProxy<'_>, tx: &watch::Sender<MprisState>) {
     let status = player.playback_status().await.unwrap_or_default();
     let metadata = player.metadata().await.unwrap_or_default();
@@ -291,6 +309,7 @@ async fn update_from_player(player: &MprisPlayerProxy<'_>, tx: &watch::Sender<Mp
     }
 }
 
+/// Extract `xesam:artist` (string or array), `xesam:title`, `xesam:album`.
 fn parse_metadata(
     metadata: &std::collections::HashMap<String, zbus::zvariant::Value<'_>>,
 ) -> (String, String, String) {
@@ -325,6 +344,8 @@ fn parse_metadata(
     (artist, title, album)
 }
 
+/// Publish a cleared/stopped [`MprisState`] if the current state isn't already
+/// that. Called when no player is on the bus.
 fn send_stopped_if_changed(tx: &watch::Sender<MprisState>) {
     let current = tx.borrow();
     if !current.is_stopped || !current.title.is_empty() {
