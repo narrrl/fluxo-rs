@@ -1,23 +1,31 @@
+//! Shared helpers: menu spawning, Hyprland socket lookup, and template formatting.
+
 use anyhow::{Context, Result};
 use std::io::Write;
 use std::process::{Command, Stdio};
 
+/// Pipe `items` into an external menu program (rofi/dmenu/wofi) and return
+/// the user's selection.
+///
+/// The prompt is exposed to the command as `$FLUXO_PROMPT` (preferred) and
+/// as a legacy `{prompt}` placeholder that is substituted in the shell string.
 pub fn show_menu(prompt: &str, items: &[String], menu_cmd: &str) -> Result<String> {
-    // Backward compatibility for {prompt}, but environment variable is safer
     let cmd_str = menu_cmd.replace("{prompt}", prompt);
     let mut child = Command::new("sh")
         .arg("-c")
         .arg(&cmd_str)
-        .env("FLUXO_PROMPT", prompt) // Safer shell injection
+        .env("FLUXO_PROMPT", prompt)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null()) // Suppress GTK/Wayland warnings from tools like wofi
+        // Suppress GTK/Wayland noise from tools like wofi.
+        .stderr(Stdio::null())
         .spawn()
         .context("Failed to spawn menu command")?;
 
     if let Some(mut stdin) = child.stdin.take() {
         let mut input = items.join("\n");
-        input.push('\n'); // Ensure trailing newline for wofi/rofi
+        // Trailing newline is required by wofi/rofi.
+        input.push('\n');
         stdin
             .write_all(input.as_bytes())
             .context("Failed to write to menu stdin")?;
@@ -37,11 +45,14 @@ pub fn show_menu(prompt: &str, items: &[String], menu_cmd: &str) -> Result<Strin
     Ok(selected)
 }
 
+/// Resolve the path to a Hyprland IPC socket for the current session.
+///
+/// Looks under `$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/` first,
+/// then falls back to `/tmp/hypr/...` for older Hyprland builds.
 pub fn get_hyprland_socket(socket_name: &str) -> Result<std::path::PathBuf> {
     let signature = std::env::var("HYPRLAND_INSTANCE_SIGNATURE")
         .context("HYPRLAND_INSTANCE_SIGNATURE not set")?;
 
-    // Try XDG_RUNTIME_DIR first (usually /run/user/1000)
     if let Ok(runtime_dir) = std::env::var("XDG_RUNTIME_DIR") {
         let path = std::path::PathBuf::from(runtime_dir)
             .join("hypr")
@@ -52,7 +63,6 @@ pub fn get_hyprland_socket(socket_name: &str) -> Result<std::path::PathBuf> {
         }
     }
 
-    // Fallback to /tmp
     let path = std::path::PathBuf::from("/tmp/hypr")
         .join(&signature)
         .join(socket_name);
@@ -70,6 +80,7 @@ pub fn get_hyprland_socket(socket_name: &str) -> Result<std::path::PathBuf> {
 use regex::Regex;
 use std::sync::LazyLock;
 
+/// Bucket `value` into `"normal"`, `"high"`, or `"max"` for CSS class output.
 pub fn classify_usage(value: f64, high: f64, max: f64) -> &'static str {
     if value > max {
         "max"
@@ -80,15 +91,22 @@ pub fn classify_usage(value: f64, high: f64, max: f64) -> &'static str {
     }
 }
 
+/// A typed value supplied to [`format_template`] — chosen at call site so
+/// formatting handles precision and alignment correctly per type.
 pub enum TokenValue {
     Float(f64),
     Int(i64),
     String(String),
 }
 
+/// Token grammar: `{name}`, `{name:>5}`, `{name:<8.2}`, `{name:^6}`, etc.
 pub static TOKEN_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\{([a-zA-Z0-9_]+)(?::([<>\^])?(\d+)?(?:\.(\d+))?)?\}").unwrap());
 
+/// Substitute `{name[:align[width[.precision]]]}` tokens in a template string.
+///
+/// Unknown tokens are left verbatim. Width/alignment/precision follow Rust's
+/// `std::fmt` semantics (`<` left, `^` center, `>` right).
 pub fn format_template<K>(template: &str, values: &[(K, TokenValue)]) -> String
 where
     K: AsRef<str>,

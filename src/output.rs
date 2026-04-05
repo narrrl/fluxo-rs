@@ -1,12 +1,22 @@
+//! JSON payload returned to Waybar custom modules.
+
 use serde::{Deserialize, Serialize};
 
+/// A Waybar custom module return value.
+///
+/// Serialises to the schema Waybar's `return-type: json` expects — the
+/// optional fields are omitted from the output when unset.
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct WaybarOutput {
+    /// Primary text shown in the bar.
     pub text: String,
+    /// Tooltip text shown on hover.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tooltip: Option<String>,
+    /// CSS class applied to the module (for styling).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub class: Option<String>,
+    /// Optional 0-100 value usable by bar progress indicators.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub percentage: Option<u8>,
 }

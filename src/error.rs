@@ -1,5 +1,11 @@
+//! Error types used across the crate.
+
 use thiserror::Error;
 
+/// Canonical error type for all fluxo subsystems.
+///
+/// Errors are categorised so that [`FluxoError::is_transient`] can distinguish
+/// temporary runtime failures (retried with backoff) from permanent ones.
 #[derive(Error, Debug)]
 #[allow(dead_code)]
 pub enum FluxoError {
@@ -41,6 +47,9 @@ pub enum FluxoError {
 }
 
 impl FluxoError {
+    /// Returns `true` for errors that represent likely-transient failures
+    /// (IO, external systems, hardware) and should trigger exponential backoff
+    /// rather than permanent cooldown.
     pub fn is_transient(&self) -> bool {
         matches!(
             self,
@@ -54,4 +63,5 @@ impl FluxoError {
     }
 }
 
+/// Crate-wide `Result` alias using [`FluxoError`].
 pub type Result<T> = std::result::Result<T, FluxoError>;

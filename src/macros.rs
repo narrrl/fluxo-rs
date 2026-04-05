@@ -1,3 +1,10 @@
+//! Central declarative macro that registers every watched module.
+//!
+//! Every piece of per-module boilerplate (AppReceivers field, IPC dispatch arm,
+//! signaler future binding, signaler select arm, config enabled-lookup, default
+//! signaler args) is generated from this single table. Adding a new module is
+//! a one-line edit here plus writing the module file itself.
+
 /// Central module registry. Defines all modules with watch channels in one place.
 ///
 /// Invoke with a callback macro name. The callback receives repeated entries of the form:

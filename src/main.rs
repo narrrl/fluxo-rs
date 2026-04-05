@@ -1,3 +1,17 @@
+//! `fluxo` — high-performance daemon/client for Waybar custom modules.
+//!
+//! The binary has two faces:
+//! * `fluxo daemon` — starts a long-lived process that polls system state
+//!   (network, cpu, audio, bluetooth, …) on background tasks and exposes the
+//!   results over a Unix socket. It also sends `SIGRTMIN+N` signals to Waybar
+//!   when module output changes, so the bar refreshes instantly.
+//! * `fluxo <module> [args]` — a tiny client that asks the daemon to evaluate
+//!   a single module and prints the Waybar-compatible JSON to stdout.
+//!
+//! Modules are feature-gated at compile time (`mod-audio`, `mod-bt`, `mod-dbus`,
+//! `mod-hardware`, `mod-network`) and registered centrally via the
+//! [`for_each_watched_module!`] macro in [`mod@macros`].
+
 #[macro_use]
 mod macros;
 mod config;
@@ -79,14 +93,15 @@ fn main() {
     }
 
     if let Some(module) = &cli.module {
-        // Special case for client-side Bluetooth menu which requires UI
+        // Bluetooth menu is handled client-side: it needs access to the user's
+        // menu command (rofi/dmenu/wofi) which the daemon has no business spawning.
         #[cfg(feature = "mod-bt")]
         if module == "bt" && cli.args.first().map(|s| s.as_str()) == Some("menu") {
             let config = config::load_config(None);
             let mut items = Vec::new();
 
-            // Parse menu_data to get connected and paired devices
-            let mut connected: Vec<(String, String)> = Vec::new(); // (alias, mac)
+            // Ask the daemon for the device list; tuples are (alias, mac).
+            let mut connected: Vec<(String, String)> = Vec::new();
             let mut paired: Vec<(String, String)> = Vec::new();
 
             if let Ok(json_str) = ipc::request_data("bt", &["menu_data"])
@@ -106,9 +121,7 @@ fn main() {
                 }
             }
 
-            // Per-device sections for connected devices
             for (alias, mac) in &connected {
-                // Get modes for this specific device
                 if let Ok(json_str) = ipc::request_data("bt", &["get_modes", mac])
                     && let Ok(val) = serde_json::from_str::<serde_json::Value>(&json_str)
                     && let Some(modes_str) = val.get("text").and_then(|t| t.as_str())
@@ -121,7 +134,6 @@ fn main() {
                 items.push(format!("Disconnect {} [{}]", alias, mac));
             }
 
-            // Separator and paired devices for connecting
             if !paired.is_empty() {
                 items.push("--- Connect Device ---".to_string());
                 for (alias, mac) in &paired {
@@ -134,7 +146,7 @@ fn main() {
                     utils::show_menu("BT Menu: ", &items, &config.general.menu_command)
                 {
                     if selected.contains(": Mode: ") {
-                        // "<alias>: Mode: <mode> [<MAC>]"
+                        // Parse "<alias>: Mode: <mode> [<MAC>]".
                         if let Some(bracket_start) = selected.rfind('[')
                             && let Some(bracket_end) = selected.rfind(']')
                         {
@@ -149,7 +161,7 @@ fn main() {
                             }
                         }
                     } else if selected.starts_with("Disconnect ") {
-                        // "Disconnect <alias> [<MAC>]"
+                        // Parse "Disconnect <alias> [<MAC>]".
                         if let Some(bracket_start) = selected.rfind('[')
                             && let Some(bracket_end) = selected.rfind(']')
                         {
@@ -157,7 +169,7 @@ fn main() {
                             handle_ipc_response(ipc::request_data("bt", &["disconnect", mac]));
                         }
                     } else if selected == "--- Connect Device ---" {
-                        // separator, do nothing
+                        // section header
                     } else if let Some(mac_start) = selected.rfind('(')
                         && let Some(mac_end) = selected.rfind(')')
                     {
@@ -171,8 +183,8 @@ fn main() {
             return;
         }
 
-        // Generic module dispatch
-        // Translate module-specific shorthand targets
+        // `vol` and `mic` both dispatch to the audio module; we just prepend
+        // the "sink" / "source" argument so the server picks the right device.
         let (actual_module, actual_args) = if module == "vol" {
             let mut new_args = vec!["sink".to_string()];
             new_args.extend(cli.args.clone());
@@ -193,6 +205,13 @@ fn main() {
     }
 }
 
+/// Post-process the daemon's response for direct output to Waybar.
+///
+/// Normal spaces are replaced with figure-spaces (U+2007) so Waybar's
+/// proportional font does not jitter between updates, and the text is wrapped
+/// in zero-width spaces (U+200B) as a cosmetic padding trick. Markup strings
+/// (containing `<`) pass through untouched. On IPC failure an `error` output
+/// is emitted and the client exits non-zero.
 fn handle_ipc_response(response: anyhow::Result<String>) {
     match response {
         Ok(json_str) => match serde_json::from_str::<serde_json::Value>(&json_str) {

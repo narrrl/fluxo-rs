@@ -1,3 +1,18 @@
+//! Daemon entry point: orchestrates polling tasks, signal handling, config
+//! hot-reloading, and the IPC server.
+//!
+//! Layout of [`run_daemon`]:
+//!
+//! 1. **Channels** — `watch::channel()` pairs for every module that pushes
+//!    state from a background task.
+//! 2. **Polling / event tasks** — one per module; each writes into its sender,
+//!    the signaler and request handlers read from the matching receiver.
+//! 3. **Config watchers** — filesystem notifier + `SIGHUP` handler refresh the
+//!    [`Config`] in place so modules see updates immediately.
+//! 4. **Signaler** — watches all state receivers and pokes Waybar.
+//! 5. **IPC loop** — `UnixListener` accepting client requests; each connection
+//!    dispatches to [`crate::registry::dispatch`] and returns JSON.
+
 use crate::config::Config;
 use crate::ipc::socket_path;
 #[cfg(feature = "mod-audio")]
@@ -31,7 +46,11 @@ use tokio::time::{Duration, sleep};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info};
 
-/// Spawn a health-tracked polling loop. `$poll_expr` is awaited each cycle.
+/// Spawn a health-tracked polling loop.
+///
+/// Each iteration: skip if in backoff, else await `$poll_expr` and feed the
+/// `Result` to [`crate::health::handle_poll_result`]. The loop breaks when
+/// `$token` is cancelled.
 macro_rules! spawn_poll_loop {
     ($name:expr, $interval:expr, $health:expr, $token:expr, $poll_expr:expr) => {
         tokio::spawn(async move {
@@ -51,7 +70,10 @@ macro_rules! spawn_poll_loop {
     };
 }
 
-/// Spawn a health-tracked polling loop with an extra trigger channel for early wake-up.
+/// Spawn a health-tracked polling loop with an extra trigger channel.
+///
+/// Identical to [`spawn_poll_loop`] but `$trigger` can wake the loop early —
+/// used by the Bluetooth daemon when a client forces an immediate refresh.
 macro_rules! spawn_poll_loop_triggered {
     ($name:expr, $interval:expr, $health:expr, $token:expr, $trigger:expr, $poll_expr:expr) => {
         tokio::spawn(async move {
@@ -72,7 +94,10 @@ macro_rules! spawn_poll_loop_triggered {
     };
 }
 
-/// Spawn a simple polling loop without health tracking.
+/// Spawn a polling loop with no health tracking.
+///
+/// Used for internal daemons (hardware fast/slow) whose poll functions are
+/// infallible and whose failures don't drive client-visible backoff.
 macro_rules! spawn_poll_loop_simple {
     ($name:expr, $interval:expr, $token:expr, $poll_expr:expr) => {
         tokio::spawn(async move {
@@ -104,6 +129,11 @@ fn get_config_path(custom_path: Option<PathBuf>) -> PathBuf {
     custom_path.unwrap_or_else(crate::config::default_config_path)
 }
 
+/// Run the daemon to completion.
+///
+/// Sets up the socket, spawns all enabled module tasks, hooks up config
+/// hot-reloading, and finally enters the IPC accept loop. Returns only on
+/// a fatal error or `Ctrl+C`.
 pub async fn run_daemon(config_path: Option<PathBuf>) -> Result<()> {
     let sock_path = socket_path();
 
@@ -191,7 +221,8 @@ pub async fn run_daemon(config_path: Option<PathBuf>) -> Result<()> {
         path: sock_path.clone(),
     };
 
-    // Signal handling for graceful shutdown
+    // Ctrl+C triggers a graceful shutdown by cancelling this token; every
+    // spawned polling task checks it in its `select!`.
     let cancel_token = CancellationToken::new();
     let token_clone = cancel_token.clone();
     tokio::spawn(async move {
@@ -204,7 +235,6 @@ pub async fn run_daemon(config_path: Option<PathBuf>) -> Result<()> {
     let config = Arc::new(RwLock::new(crate::config::load_config(config_path.clone())));
     spawn_config_watchers(&config, &resolved_config_path);
 
-    // 1. Network Task
     #[cfg(feature = "mod-network")]
     if config.read().await.network.enabled {
         let mut daemon = NetworkDaemon::new();
@@ -219,7 +249,7 @@ pub async fn run_daemon(config_path: Option<PathBuf>) -> Result<()> {
         );
     }
 
-    // 2. Fast Hardware Task (CPU, Mem, Load)
+    // Fast-cycle hardware (cpu/mem/load) polled at 1 Hz.
     #[cfg(feature = "mod-hardware")]
     {
         let cfg = config.read().await;
@@ -237,7 +267,7 @@ pub async fn run_daemon(config_path: Option<PathBuf>) -> Result<()> {
         }
     }
 
-    // 3. Slow Hardware Task (GPU, Disks)
+    // Slow-cycle hardware (gpu/disks) polled every 5 s — expensive to sample.
     #[cfg(feature = "mod-hardware")]
     {
         let cfg = config.read().await;
@@ -255,7 +285,6 @@ pub async fn run_daemon(config_path: Option<PathBuf>) -> Result<()> {
         }
     }
 
-    // 4. Bluetooth Task
     #[cfg(feature = "mod-bt")]
     if config.read().await.bt.enabled {
         let mut daemon = BtDaemon::new();
@@ -270,41 +299,38 @@ pub async fn run_daemon(config_path: Option<PathBuf>) -> Result<()> {
         });
     }
 
-    // 5. Audio Thread (Event driven)
+    // Event-driven subsystems — these spawn their own threads internally and
+    // push into their watch sender as events arrive (no polling loop).
     #[cfg(feature = "mod-audio")]
     if config.read().await.audio.enabled {
         let audio_daemon = AudioDaemon::new();
         audio_daemon.start(&audio_tx, audio_cmd_rx);
     }
 
-    // 5.1 Backlight Thread (Event driven)
     #[cfg(feature = "mod-dbus")]
     if config.read().await.backlight.enabled {
         let backlight_daemon = BacklightDaemon::new();
         backlight_daemon.start(backlight_tx);
     }
 
-    // 5.2 Keyboard Thread (Event driven)
     #[cfg(feature = "mod-dbus")]
     if config.read().await.keyboard.enabled {
         let keyboard_daemon = KeyboardDaemon::new();
         keyboard_daemon.start(keyboard_tx);
     }
 
-    // 5.3 DND Thread (Event driven)
     #[cfg(feature = "mod-dbus")]
     if config.read().await.dnd.enabled {
         let dnd_daemon = DndDaemon::new();
         dnd_daemon.start(dnd_tx);
     }
 
-    // 5.4 MPRIS Thread
     #[cfg(feature = "mod-dbus")]
     if config.read().await.mpris.enabled {
         let mpris_daemon = MprisDaemon::new();
         mpris_daemon.start(mpris_tx);
 
-        // Scroll ticker for MPRIS marquee animation
+        // Ticks the scroll offset forward for the marquee animation.
         let scroll_config = Arc::clone(&config);
         let scroll_rx = receivers.mpris.clone();
         let scroll_state = Arc::clone(&mpris_scroll);
@@ -319,7 +345,6 @@ pub async fn run_daemon(config_path: Option<PathBuf>) -> Result<()> {
         });
     }
 
-    // 6. Waybar Signaler Task
     let signaler = WaybarSignaler::new();
     let sig_config = Arc::clone(&config);
     let sig_receivers = receivers.clone();
@@ -332,8 +357,14 @@ pub async fn run_daemon(config_path: Option<PathBuf>) -> Result<()> {
     run_ipc_loop(listener, receivers, config, config_path, cancel_token).await
 }
 
+/// Spawn background tasks that hot-reload the daemon's [`Config`].
+///
+/// Installs a `notify`-based filesystem watcher on the config file's parent
+/// directory, plus a `SIGHUP` handler — either triggers a reload of the
+/// shared `Arc<RwLock<Config>>`.
 fn spawn_config_watchers(config: &Arc<RwLock<Config>>, resolved_path: &std::path::Path) {
-    // File watcher (hot reload on modify/create)
+    // `notify` recursively tracks the parent dir so atomic-write editors
+    // (which rename a new file into place) still get picked up.
     let watcher_config = Arc::clone(config);
     let watcher_path = resolved_path.to_path_buf();
     tokio::spawn(async move {
@@ -359,6 +390,7 @@ fn spawn_config_watchers(config: &Arc<RwLock<Config>>, resolved_path: &std::path
         loop {
             tokio::select! {
                 _ = ev_rx.recv() => {
+                    // Coalesce rapid editor writes into one reload.
                     sleep(Duration::from_millis(100)).await;
                     while ev_rx.try_recv().is_ok() {}
                     reload_config(&watcher_config, Some(watcher_path.clone())).await;
@@ -367,7 +399,6 @@ fn spawn_config_watchers(config: &Arc<RwLock<Config>>, resolved_path: &std::path
         }
     });
 
-    // SIGHUP handler
     let hup_config = Arc::clone(config);
     let hup_path = resolved_path.to_path_buf();
     tokio::spawn(async move {
@@ -381,6 +412,12 @@ fn spawn_config_watchers(config: &Arc<RwLock<Config>>, resolved_path: &std::path
     });
 }
 
+/// Accept loop for the client Unix socket.
+///
+/// Each client request spawns a short-lived task that reads one line, looks
+/// up the module via [`crate::registry::dispatch`], and writes the JSON
+/// response back. Broken-pipe errors are logged at `debug` — they just mean
+/// the client timed out before we responded.
 async fn run_ipc_loop(
     listener: UnixListener,
     receivers: AppReceivers,
@@ -447,6 +484,7 @@ async fn run_ipc_loop(
     Ok(())
 }
 
+/// Re-read the configuration file and swap it into the shared lock.
 pub async fn reload_config(config_lock: &Arc<RwLock<Config>>, path: Option<PathBuf>) {
     info!("Reloading configuration...");
     let new_config = crate::config::load_config(path);
@@ -455,6 +493,10 @@ pub async fn reload_config(config_lock: &Arc<RwLock<Config>>, path: Option<PathB
     info!("Configuration reloaded successfully.");
 }
 
+/// Evaluate a module with its signaler-default args and return the JSON body.
+///
+/// Used by the [`crate::signaler`] to decide whether the module's output has
+/// actually changed before sending Waybar a signal.
 pub async fn evaluate_module_for_signaler(
     module_name: &str,
     state: &AppReceivers,

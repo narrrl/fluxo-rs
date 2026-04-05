@@ -1,11 +1,27 @@
+//! Shared state types exchanged between daemon tasks and modules.
+//!
+//! Every "watched" module has a `watch::Receiver<StateType>` held by
+//! [`AppReceivers`]; background tasks write into the paired sender. Readers
+//! (the request handler, the signaler) take a cheap snapshot via
+//! `Receiver::borrow()` and render their output from it.
+
 use crate::output::WaybarOutput;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{RwLock, mpsc, watch};
 use tokio::time::Instant;
 
+/// Generates the [`AppReceivers`] struct, with one `watch::Receiver` field
+/// per watched module (cfg-gated by feature flag).
 macro_rules! gen_app_receivers {
     ($( { $feature:literal, $field:ident, $state:ty, [$($name:literal),+], [$($sig_name:literal),+], $module:path, $signal:ident, [$($default_arg:literal),*], $config:ident } )*) => {
+        /// Bundle of every watch-channel receiver and control-channel handle.
+        ///
+        /// Cloned into each IPC request handler and each module daemon so that
+        /// they can snapshot state without locking. Per-module receivers are
+        /// generated from [`for_each_watched_module!`]; the remaining fields
+        /// (`health`, `bt_cycle`, `audio_cmd_tx`, `mpris_scroll_*`) are shared
+        /// control state.
         #[derive(Clone)]
         pub struct AppReceivers {
             $(
@@ -28,6 +44,7 @@ macro_rules! gen_app_receivers {
 }
 for_each_watched_module!(gen_app_receivers);
 
+/// Runtime health statistics used for backoff decisions.
 #[derive(Clone, Default)]
 pub struct ModuleHealth {
     pub consecutive_failures: u32,
@@ -36,6 +53,7 @@ pub struct ModuleHealth {
     pub last_successful_output: Option<WaybarOutput>,
 }
 
+/// Current default audio sink + source plus all available devices.
 #[derive(Default, Clone)]
 pub struct AudioState {
     pub sink: AudioDeviceInfo,
@@ -44,6 +62,7 @@ pub struct AudioState {
     pub available_sources: Vec<String>,
 }
 
+/// Metadata for one PulseAudio sink or source.
 #[derive(Default, Clone)]
 pub struct AudioDeviceInfo {
     pub name: String,
@@ -53,6 +72,7 @@ pub struct AudioDeviceInfo {
     pub channels: u8,
 }
 
+/// A single BlueZ device, optionally annotated by a plugin (buds, maestro…).
 #[derive(Default, Clone)]
 pub struct BtDeviceInfo {
     pub device_alias: String,
@@ -61,6 +81,7 @@ pub struct BtDeviceInfo {
     pub plugin_data: Vec<(String, String)>,
 }
 
+/// Snapshot of the Bluetooth adapter plus every tracked device.
 #[derive(Default, Clone)]
 pub struct BtState {
     pub adapter_powered: bool,
@@ -68,6 +89,10 @@ pub struct BtState {
 }
 
 impl BtState {
+    /// Return the device the client is currently cycled to, if any.
+    ///
+    /// The `index` is taken modulo `devices.len()` so cycling past the end
+    /// wraps around naturally.
     pub fn active_device(&self, index: usize) -> Option<&BtDeviceInfo> {
         if self.devices.is_empty() {
             None
@@ -77,6 +102,7 @@ impl BtState {
     }
 }
 
+/// Per-mountpoint disk usage.
 #[derive(Default, Clone)]
 pub struct DiskInfo {
     pub mount_point: String,
@@ -85,6 +111,7 @@ pub struct DiskInfo {
     pub available_bytes: u64,
 }
 
+/// Throughput and identity of the active network interface.
 #[derive(Default, Clone)]
 pub struct NetworkState {
     pub rx_mbps: f64,
@@ -93,6 +120,7 @@ pub struct NetworkState {
     pub ip: String,
 }
 
+/// CPU utilisation and temperature.
 #[derive(Clone)]
 pub struct CpuState {
     pub usage: f64,
@@ -110,12 +138,14 @@ impl Default for CpuState {
     }
 }
 
+/// RAM usage in gigabytes.
 #[derive(Default, Clone)]
 pub struct MemoryState {
     pub used_gb: f64,
     pub total_gb: f64,
 }
 
+/// Load averages, uptime, and process count.
 #[derive(Default, Clone)]
 pub struct SysState {
     pub load_1: f64,
@@ -125,6 +155,9 @@ pub struct SysState {
     pub process_count: usize,
 }
 
+/// GPU snapshot (vendor-agnostic).
+///
+/// `active` is `false` until detection finds a supported GPU.
 #[derive(Clone)]
 pub struct GpuState {
     pub active: bool,
@@ -150,27 +183,32 @@ impl Default for GpuState {
     }
 }
 
+/// Do-Not-Disturb toggle state.
 #[derive(Default, Clone)]
 pub struct DndState {
     pub is_dnd: bool,
 }
 
+/// Currently active keyboard layout.
 #[derive(Default, Clone)]
 pub struct KeyboardState {
     pub layout: String,
 }
 
+/// Display backlight brightness as a 0-100 percentage.
 #[derive(Default, Clone)]
 pub struct BacklightState {
     pub percentage: u8,
 }
 
+/// Marquee scroll position for the MPRIS module.
 #[derive(Default, Clone)]
 pub struct MprisScrollState {
     pub offset: usize,
     pub full_text: String,
 }
 
+/// Currently playing media metadata from an MPRIS player.
 #[derive(Default, Clone)]
 pub struct MprisState {
     pub is_playing: bool,
@@ -181,6 +219,10 @@ pub struct MprisState {
     pub album: String,
 }
 
+/// Test harness holding a synthetic [`AppReceivers`] plus its senders.
+///
+/// The senders are kept alive via `_*_tx` fields so test code can drive the
+/// watch channels without them being dropped.
 #[cfg(test)]
 pub struct MockState {
     pub receivers: AppReceivers,
@@ -210,6 +252,7 @@ pub struct MockState {
     _dnd_tx: watch::Sender<DndState>,
 }
 
+/// Plain-data counterpart of [`AppReceivers`] used to seed a [`MockState`].
 #[cfg(test)]
 #[derive(Default, Clone)]
 pub struct AppState {
@@ -240,6 +283,7 @@ pub struct AppState {
     pub health: HashMap<String, ModuleHealth>,
 }
 
+/// Build a [`MockState`] from a plain [`AppState`] snapshot for unit tests.
 #[cfg(test)]
 pub fn mock_state(state: AppState) -> MockState {
     #[cfg(feature = "mod-network")]

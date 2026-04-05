@@ -1,8 +1,16 @@
+//! Configuration loading + top-level `Config` struct.
+//!
+//! Every module section `#[derive(Deserialize)]`s its own struct with `serde`
+//! defaults, so missing TOML sections/fields simply fall back to baked-in
+//! values. The live `Config` is held behind an `Arc<RwLock<_>>` by the daemon
+//! and replaced atomically on reload (see [`crate::daemon::reload_config`]).
+
 use serde::Deserialize;
 use std::fs;
 use std::path::PathBuf;
 use tracing::{debug, info, warn};
 
+/// Top-level parsed `config.toml`. Each field corresponds to a `[section]`.
 #[derive(Deserialize, Default, Clone)]
 pub struct Config {
     #[serde(default)]
@@ -56,8 +64,10 @@ pub struct Config {
     pub dnd: DndConfig,
 }
 
+/// Process-wide settings that aren't tied to a single module.
 #[derive(Deserialize, Clone)]
 pub struct GeneralConfig {
+    /// Shell command spawned by [`crate::utils::show_menu`] for interactive pickers.
     pub menu_command: String,
 }
 
@@ -69,6 +79,9 @@ impl Default for GeneralConfig {
     }
 }
 
+/// Which Waybar `SIGRTMIN+N` signal each module should trigger, if any.
+///
+/// `None` disables signalling for that module entirely.
 #[allow(dead_code)]
 #[derive(Deserialize, Default, Clone)]
 pub struct SignalsConfig {
@@ -89,6 +102,7 @@ pub struct SignalsConfig {
     pub dnd: Option<i32>,
 }
 
+/// Network module config. `format` tokens: `interface`, `ip`, `rx`, `tx`.
 #[derive(Deserialize, Clone)]
 pub struct NetworkConfig {
     #[serde(default = "default_true")]
@@ -105,6 +119,7 @@ impl Default for NetworkConfig {
     }
 }
 
+/// CPU module config. `format` tokens: `usage`, `temp`.
 #[derive(Deserialize, Clone)]
 pub struct CpuConfig {
     #[serde(default = "default_true")]
@@ -121,6 +136,7 @@ impl Default for CpuConfig {
     }
 }
 
+/// Memory module config. `format` tokens: `used`, `total` (gigabytes).
 #[derive(Deserialize, Clone)]
 pub struct MemoryConfig {
     #[serde(default = "default_true")]
@@ -137,6 +153,7 @@ impl Default for MemoryConfig {
     }
 }
 
+/// GPU module config with per-vendor format strings.
 #[derive(Deserialize, Clone)]
 pub struct GpuConfig {
     #[serde(default = "default_true")]
@@ -159,6 +176,7 @@ impl Default for GpuConfig {
     }
 }
 
+/// Sys module config. `format` tokens: `uptime`, `load1`, `load5`, `load15`, `procs`.
 #[derive(Deserialize, Clone)]
 pub struct SysConfig {
     #[serde(default = "default_true")]
@@ -175,6 +193,7 @@ impl Default for SysConfig {
     }
 }
 
+/// Disk module config. `format` tokens: `mount`, `used`, `total`.
 #[derive(Deserialize, Clone)]
 pub struct DiskConfig {
     #[serde(default = "default_true")]
@@ -191,6 +210,7 @@ impl Default for DiskConfig {
     }
 }
 
+/// Btrfs pool module config. `format` tokens: `used`, `total`.
 #[derive(Deserialize, Clone)]
 pub struct PoolConfig {
     #[serde(default = "default_true")]
@@ -207,6 +227,7 @@ impl Default for PoolConfig {
     }
 }
 
+/// Battery/power module config. `format` tokens: `percentage`, `icon`.
 #[derive(Deserialize, Clone)]
 pub struct PowerConfig {
     #[serde(default = "default_true")]
@@ -223,6 +244,7 @@ impl Default for PowerConfig {
     }
 }
 
+/// Audio module config, one format per (sink|source) × (muted|unmuted) state.
 #[derive(Deserialize, Clone)]
 pub struct AudioConfig {
     #[serde(default = "default_true")]
@@ -245,6 +267,8 @@ impl Default for AudioConfig {
     }
 }
 
+/// Bluetooth module config. Plugin line tokens: `alias`, `left`, `right`,
+/// `anc`, `mac`. Plain connect line tokens: `alias`.
 #[derive(Deserialize, Clone)]
 pub struct BtConfig {
     #[serde(default = "default_true")]
@@ -267,6 +291,7 @@ impl Default for BtConfig {
     }
 }
 
+/// Gamemode indicator config (active/inactive glyphs).
 #[derive(Deserialize, Clone)]
 pub struct GameConfig {
     #[serde(default = "default_true")]
@@ -285,6 +310,8 @@ impl Default for GameConfig {
     }
 }
 
+/// MPRIS module config. `format` tokens: `artist`, `title`, `album`,
+/// `status_icon`. Optional marquee scrolling when `scroll = true`.
 #[derive(Deserialize, Clone)]
 pub struct MprisConfig {
     #[serde(default = "default_true")]
@@ -321,6 +348,7 @@ impl Default for MprisConfig {
     }
 }
 
+/// Backlight module config. `format` tokens: `percentage`, `icon`.
 #[derive(Deserialize, Clone)]
 pub struct BacklightConfig {
     #[serde(default = "default_true")]
@@ -337,6 +365,7 @@ impl Default for BacklightConfig {
     }
 }
 
+/// Keyboard layout module config. `format` tokens: `layout`.
 #[derive(Deserialize, Clone)]
 pub struct KeyboardConfig {
     #[serde(default = "default_true")]
@@ -353,6 +382,7 @@ impl Default for KeyboardConfig {
     }
 }
 
+/// Do-Not-Disturb indicator config (dnd/normal glyphs).
 #[derive(Deserialize, Clone)]
 pub struct DndConfig {
     #[serde(default = "default_true")]
@@ -420,6 +450,8 @@ impl Config {
         for_each_watched_module!(gen_enabled_match)
     }
 
+    /// Warn-log any `{token}` placeholders used in format strings that the
+    /// corresponding module does not know how to fill in.
     pub fn validate(&self) {
         #[cfg(feature = "mod-network")]
         validate_format(
@@ -496,6 +528,8 @@ impl Config {
     }
 }
 
+/// Resolve the default config path: `$XDG_CONFIG_HOME/fluxo/config.toml`
+/// (or `~/.config/fluxo/config.toml`).
 pub fn default_config_path() -> PathBuf {
     let config_dir = std::env::var("XDG_CONFIG_HOME")
         .map(PathBuf::from)
@@ -506,6 +540,8 @@ pub fn default_config_path() -> PathBuf {
     config_dir.join("fluxo/config.toml")
 }
 
+/// Load and validate the config, falling back to [`Config::default`] when
+/// the file is missing or malformed. Never panics.
 pub fn load_config(custom_path: Option<PathBuf>) -> Config {
     let config_path = custom_path.unwrap_or_else(default_config_path);
 

@@ -1,3 +1,10 @@
+//! Per-module health tracking and exponential backoff.
+//!
+//! Both the IPC request handler (for on-demand module evaluation) and the
+//! background polling loops consult this module. Transient errors increment a
+//! failure counter that grows the cooldown window; permanent errors trigger an
+//! immediate long cooldown.
+
 use crate::output::WaybarOutput;
 use crate::state::{AppReceivers, ModuleHealth};
 use std::collections::HashMap;
@@ -101,6 +108,10 @@ pub async fn handle_poll_result(
     }
 }
 
+/// Serialise a response to return while a module is cooling down.
+///
+/// If a cached successful output exists, it is returned with a `warning` CSS
+/// class appended; otherwise a generic "Cooling down" placeholder is emitted.
 pub fn backoff_response(module_name: &str, cached: Option<WaybarOutput>) -> String {
     if let Some(mut cached) = cached {
         let class = cached.class.unwrap_or_default();
@@ -113,6 +124,10 @@ pub fn backoff_response(module_name: &str, cached: Option<WaybarOutput>) -> Stri
     )
 }
 
+/// Serialise a fallback response for a module that errored this request.
+///
+/// Prefers showing the last successful cached output (with a `warning` class)
+/// over a bare error text, to keep the bar visually stable.
 pub fn error_response(
     module_name: &str,
     e: &crate::error::FluxoError,

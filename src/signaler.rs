@@ -1,3 +1,11 @@
+//! Waybar signalling: watch state channels, send `SIGRTMIN+N` on changes.
+//!
+//! Waybar's custom modules use `signal = N` to rerun their command when they
+//! receive `SIGRTMIN+N`. This task subscribes to every watched module's
+//! `watch::Receiver`, evaluates the module when its channel fires, and only
+//! signals Waybar when the rendered output actually changed. A 50 ms per-signal
+//! debounce prevents storms during rapid state churn.
+
 use crate::config::Config;
 use crate::state::AppReceivers;
 use std::collections::HashMap;
@@ -7,6 +15,10 @@ use tokio::sync::RwLock;
 use tokio::time::{Duration, Instant, sleep};
 use tracing::{debug, warn};
 
+/// Sends real-time signals to the Waybar process.
+///
+/// Resolves Waybar's PID lazily and caches it — the PID is invalidated on
+/// signal failure (e.g. Waybar was restarted) and rediscovered via `sysinfo`.
 pub struct WaybarSignaler {
     cached_pid: Option<i32>,
     sys: System,
@@ -14,6 +26,7 @@ pub struct WaybarSignaler {
 }
 
 impl WaybarSignaler {
+    /// Create a new signaler with no cached PID.
     pub fn new() -> Self {
         Self {
             cached_pid: None,
@@ -65,9 +78,19 @@ impl WaybarSignaler {
     }
 }
 
+/// Generates [`WaybarSignaler::run`] from the central module registry.
+///
+/// For each watched module we emit:
+/// * a cfg-gated `watch::Receiver::changed()` future (or `pending::<()>` when
+///   the feature is disabled, so the `tokio::select!` arm compiles uniformly),
+/// * a `select!` arm that re-evaluates the module and signals Waybar once per
+///   changed output.
 macro_rules! gen_signaler_run {
     ($( { $feature:literal, $field:ident, $state:ty, [$($name:literal),+], [$($sig_name:literal),+], $module:path, $signal:ident, [$($default_arg:literal),*], $config:ident } )*) => {
         impl WaybarSignaler {
+            /// Run the signaler event loop forever.
+            ///
+            /// Consumes `self`; intended to be spawned as a long-lived task.
             pub async fn run(mut self, config_lock: Arc<RwLock<Config>>, mut receivers: AppReceivers) {
                 let mut last_outputs: HashMap<&'static str, String> = HashMap::new();
 
@@ -128,7 +151,7 @@ macro_rules! gen_signaler_run {
                         }
 
                         _ = sleep(Duration::from_secs(5)) => {
-                            // loop and refresh config
+                            // heartbeat: re-read signals config on each iteration
                         }
                     }
                 }
