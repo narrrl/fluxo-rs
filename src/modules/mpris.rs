@@ -201,103 +201,141 @@ impl MprisDaemon {
     }
 
     async fn listen_loop(tx: &watch::Sender<MprisState>) -> anyhow::Result<()> {
+        use futures::StreamExt;
+
         let connection = Connection::session().await?;
-
         info!("Connected to D-Bus for MPRIS monitoring");
-
-        // Periodically poll for the active player and update the MPRIS state.
-        // This avoids complex dynamic signal tracking across ephemeral player instances.
 
         let dbus_proxy = DBusProxy::new(&connection).await?;
 
         loop {
+            // Discovery pass: find an active MPRIS player.
             let names = dbus_proxy.list_names().await?;
-            let mut active_player = None;
+            let active_player = names
+                .into_iter()
+                .find(|n| n.starts_with("org.mpris.MediaPlayer2."));
 
-            for name in names {
-                if name.starts_with("org.mpris.MediaPlayer2.") {
-                    active_player = Some(name);
-                    break; // Just grab the first active player for now
+            let Some(player_name) = active_player else {
+                send_stopped_if_changed(tx);
+                // No player — wait and re-discover.
+                tokio::time::sleep(Duration::from_secs(5)).await;
+                continue;
+            };
+
+            let player_proxy = match MprisPlayerProxy::builder(&connection)
+                .destination(player_name.clone())?
+                .build()
+                .await
+            {
+                Ok(p) => p,
+                Err(_) => {
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                    continue;
                 }
-            }
+            };
 
-            if let Some(player_name) = active_player {
-                if let Ok(player_proxy) = MprisPlayerProxy::builder(&connection)
-                    .destination(player_name.clone())?
-                    .build()
-                    .await
-                {
-                    let status = player_proxy.playback_status().await.unwrap_or_default();
-                    let metadata = player_proxy.metadata().await.unwrap_or_default();
+            // Initial fetch and then signal-driven updates via PropertiesChanged.
+            update_from_player(&player_proxy, tx).await;
 
-                    let is_playing = status == "Playing";
-                    let is_paused = status == "Paused";
-                    let is_stopped = status == "Stopped";
+            let mut status_stream = player_proxy.receive_playback_status_changed().await;
+            let mut metadata_stream = player_proxy.receive_metadata_changed().await;
 
-                    let mut artist = String::new();
-                    let mut title = String::new();
-                    let mut album = String::new();
-
-                    if let Some(v) = metadata.get("xesam:artist") {
-                        if let Ok(arr) = zbus::zvariant::Array::try_from(v) {
-                            let mut artists = Vec::new();
-                            for i in 0..arr.len() {
-                                if let Ok(Some(s)) = arr.get::<&str>(i) {
-                                    artists.push(s.to_string());
-                                }
-                            }
-                            artist = artists.join(", ");
-                        } else if let Ok(a) = <&str>::try_from(v) {
-                            artist = a.to_string();
+            loop {
+                tokio::select! {
+                    Some(_) = status_stream.next() => {
+                        update_from_player(&player_proxy, tx).await;
+                    }
+                    Some(_) = metadata_stream.next() => {
+                        update_from_player(&player_proxy, tx).await;
+                    }
+                    _ = tokio::time::sleep(Duration::from_secs(10)) => {
+                        // Heartbeat: verify the player is still on the bus.
+                        let current = dbus_proxy.list_names().await.unwrap_or_default();
+                        if !current.iter().any(|n| n == &player_name) {
+                            break;
                         }
                     }
-                    if let Some(v) = metadata.get("xesam:title")
-                        && let Ok(t) = <&str>::try_from(v)
-                    {
-                        title = t.to_string();
-                    }
-                    if let Some(v) = metadata.get("xesam:album")
-                        && let Ok(a) = <&str>::try_from(v)
-                    {
-                        album = a.to_string();
-                    }
-
-                    // Only send if changed
-                    let current = tx.borrow();
-                    if current.is_playing != is_playing
-                        || current.is_paused != is_paused
-                        || current.is_stopped != is_stopped
-                        || current.title != title
-                        || current.artist != artist
-                        || current.album != album
-                    {
-                        drop(current); // Drop borrow before send
-                        let _ = tx.send(MprisState {
-                            is_playing,
-                            is_paused,
-                            is_stopped,
-                            artist,
-                            title,
-                            album,
-                        });
-                    }
-                }
-            } else {
-                let current = tx.borrow();
-                if !current.is_stopped || !current.title.is_empty() {
-                    drop(current);
-                    let _ = tx.send(MprisState {
-                        is_playing: false,
-                        is_paused: false,
-                        is_stopped: true,
-                        artist: String::new(),
-                        title: String::new(),
-                        album: String::new(),
-                    });
                 }
             }
-
-            tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
         }
+    }
+}
+
+async fn update_from_player(player: &MprisPlayerProxy<'_>, tx: &watch::Sender<MprisState>) {
+    let status = player.playback_status().await.unwrap_or_default();
+    let metadata = player.metadata().await.unwrap_or_default();
+
+    let is_playing = status == "Playing";
+    let is_paused = status == "Paused";
+    let is_stopped = status == "Stopped";
+
+    let (artist, title, album) = parse_metadata(&metadata);
+
+    let current = tx.borrow();
+    if current.is_playing != is_playing
+        || current.is_paused != is_paused
+        || current.is_stopped != is_stopped
+        || current.title != title
+        || current.artist != artist
+        || current.album != album
+    {
+        drop(current);
+        let _ = tx.send(MprisState {
+            is_playing,
+            is_paused,
+            is_stopped,
+            artist,
+            title,
+            album,
+        });
+    }
+}
+
+fn parse_metadata(
+    metadata: &std::collections::HashMap<String, zbus::zvariant::Value<'_>>,
+) -> (String, String, String) {
+    let mut artist = String::new();
+    let mut title = String::new();
+    let mut album = String::new();
+
+    if let Some(v) = metadata.get("xesam:artist") {
+        if let Ok(arr) = zbus::zvariant::Array::try_from(v) {
+            let mut artists = Vec::new();
+            for i in 0..arr.len() {
+                if let Ok(Some(s)) = arr.get::<&str>(i) {
+                    artists.push(s.to_string());
+                }
+            }
+            artist = artists.join(", ");
+        } else if let Ok(a) = <&str>::try_from(v) {
+            artist = a.to_string();
+        }
+    }
+    if let Some(v) = metadata.get("xesam:title")
+        && let Ok(t) = <&str>::try_from(v)
+    {
+        title = t.to_string();
+    }
+    if let Some(v) = metadata.get("xesam:album")
+        && let Ok(a) = <&str>::try_from(v)
+    {
+        album = a.to_string();
+    }
+
+    (artist, title, album)
+}
+
+fn send_stopped_if_changed(tx: &watch::Sender<MprisState>) {
+    let current = tx.borrow();
+    if !current.is_stopped || !current.title.is_empty() {
+        drop(current);
+        let _ = tx.send(MprisState {
+            is_playing: false,
+            is_paused: false,
+            is_stopped: true,
+            artist: String::new(),
+            title: String::new(),
+            album: String::new(),
+        });
     }
 }
