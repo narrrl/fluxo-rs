@@ -1,6 +1,6 @@
 [package]
 name = "fluxo-rs"
-version = "0.5.3"
+version = "0.5.4"
 edition = "2024"
 
 [[bin]]
@@ -42,3 +42,16 @@ zbus = { version = "5", optional = true }
 
 [dev-dependencies]
 tempfile = "3"
+
+[package.metadata.deb]
+maintainer = "Nils Pukropp"
+copyright = "2024-2026 Nils Pukropp"
+depends = "$auto"
+section = "utils"
+priority = "optional"
+assets = [
+    ["target/release/fluxo", "usr/bin/", "755"],
+    ["dist/fluxo.service", "usr/lib/systemd/user/", "644"],
+    ["README.md", "usr/share/doc/fluxo/", "644"],
+    ["example.config.toml", "usr/share/doc/fluxo/", "644"],
+]

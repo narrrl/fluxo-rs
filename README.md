@@ -33,11 +33,60 @@ With its **100% Native, Content-Based Event-Driven Architecture**, it consumes e
 | `kbd` | Keyboard Layout | `{layout}` |
 | `dnd` | Do Not Disturb (SwayNC) | active/inactive strings |
 
+## Installation
+
+### From Source
+
+```bash
+cargo build --release
+cp target/release/fluxo ~/.cargo/bin/
+```
+
+### Debian/Ubuntu (.deb)
+
+```bash
+cargo install cargo-deb
+cargo deb
+sudo dpkg -i target/debian/fluxo-rs_*.deb
+```
+
+The `.deb` package installs the binary to `/usr/bin/fluxo`, the systemd user service to `/usr/lib/systemd/user/fluxo.service`, and documentation to `/usr/share/doc/fluxo/`.
+
 ## Setup
 
-1. **Build**: `cargo build --release`
-2. **Configure**: Create `~/.config/fluxo/config.toml` (see `example.config.toml`). Ensure you map your `[signals]`.
-3. **Daemon**: Start `fluxo daemon`. It is highly recommended to run this as a systemd user service.
+1. **Configure**: Create `~/.config/fluxo/config.toml` (see `example.config.toml`). Ensure you map your `[signals]`.
+2. **Start the daemon** via systemd (recommended) or manually:
+
+### systemd (recommended)
+
+If installed from the `.deb`, the service file is already in place. For manual installs:
+
+```bash
+mkdir -p ~/.config/systemd/user
+cp dist/fluxo.service ~/.config/systemd/user/
+```
+
+If your binary is not at `~/.cargo/bin/fluxo`, edit the `ExecStart=` path in the service file.
+
+Then enable and start:
+
+```bash
+systemctl --user daemon-reload
+systemctl --user enable --now fluxo
+```
+
+Check status:
+
+```bash
+systemctl --user status fluxo
+journalctl --user -u fluxo -f
+```
+
+### Manual
+
+```bash
+fluxo daemon
+```
 
 ## Waybar Configuration
 
@@ -68,7 +117,21 @@ To achieve zero-latency updates and zero-polling CPU usage, set `interval: 0` on
 
 ## Debugging
 
-Start the daemon with `RUST_LOG=debug` to see detailed logs of library interactions and circuit breaker status:
+Use `--loglevel` to control log verbosity (trace, debug, info, warn, error):
+
+```bash
+fluxo daemon --loglevel debug
+```
+
+Or via the `RUST_LOG` environment variable:
+
 ```bash
 RUST_LOG=debug fluxo daemon
+```
+
+For module help and available arguments:
+
+```bash
+fluxo help          # overview of all modules
+fluxo help vol      # detailed help for a specific module
 ```
