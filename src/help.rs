@@ -466,11 +466,12 @@ fn print_module_detail(m: &ModuleHelp) {
         println!("\x1b[1mFORMAT TOKENS:\x1b[0m  (for use in config.toml format strings)\n");
         let max_token = m.tokens.iter().map(|(t, _)| t.len()).max().unwrap_or(0);
         for (token, desc) in m.tokens {
+            let padded = format!("{{{}}}", token);
             println!(
-                "    \x1b[33m{{{:<width$}}}\x1b[0m  {}",
-                token,
+                "    \x1b[33m{:<width$}\x1b[0m  {}",
+                padded,
                 desc,
-                width = max_token
+                width = max_token + 2 // +2 for the braces
             );
         }
         println!();

@@ -30,19 +30,48 @@ mod signaler;
 mod state;
 mod utils;
 
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
 use std::process;
 use tracing::{error, info};
 use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 
+#[derive(Clone, ValueEnum)]
+enum LogLevel {
+    Trace,
+    Debug,
+    Info,
+    Warn,
+    Error,
+}
+
+impl From<LogLevel> for tracing::Level {
+    fn from(level: LogLevel) -> Self {
+        match level {
+            LogLevel::Trace => tracing::Level::TRACE,
+            LogLevel::Debug => tracing::Level::DEBUG,
+            LogLevel::Info => tracing::Level::INFO,
+            LogLevel::Warn => tracing::Level::WARN,
+            LogLevel::Error => tracing::Level::ERROR,
+        }
+    }
+}
+
 #[derive(Parser)]
 #[command(name = "fluxo")]
 #[command(about = "A high-performance daemon/client for Waybar custom modules", long_about = None)]
-#[command(disable_help_subcommand = true)]
+#[command(disable_help_subcommand = true, disable_help_flag = true)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
+
+    /// Print help information
+    #[arg(short, long, global = true)]
+    help: bool,
+
+    /// Set the log level (trace, debug, info, warn, error)
+    #[arg(long, global = true, value_enum)]
+    loglevel: Option<LogLevel>,
 
     /// Module name to query or interact with
     module: Option<String>,
@@ -70,12 +99,27 @@ enum Commands {
 }
 
 fn main() {
+    let cli = Cli::parse();
+
+    // Explicit --loglevel takes priority, then RUST_LOG env var, then a
+    // sensible default: INFO for the daemon, WARN for client commands.
+    let default_level = if let Some(level) = &cli.loglevel {
+        tracing::Level::from(level.clone())
+    } else if matches!(&cli.command, Some(Commands::Daemon { .. })) {
+        tracing::Level::INFO
+    } else {
+        tracing::Level::WARN
+    };
+
     tracing_subscriber::registry()
         .with(fmt::layer().with_target(false).pretty())
-        .with(EnvFilter::from_default_env().add_directive(tracing::Level::INFO.into()))
+        .with(EnvFilter::from_default_env().add_directive(default_level.into()))
         .init();
 
-    let cli = Cli::parse();
+    if cli.help {
+        help::print_help(None);
+        return;
+    }
 
     if let Some(command) = &cli.command {
         match command {

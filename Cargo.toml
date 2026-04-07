@@ -1,7 +1,11 @@
 [package]
 name = "fluxo-rs"
-version = "0.5.2"
+version = "0.5.3"
 edition = "2024"
+
+[[bin]]
+name = "fluxo"
+path = "src/main.rs"
 
 [features]
 default = ["mod-audio", "mod-bt", "mod-network", "mod-hardware", "mod-dbus"]

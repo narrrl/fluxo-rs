@@ -58,7 +58,7 @@ impl AudioDaemon {
                 ThreadedMainloop::new().expect("Failed to create pulse threaded mainloop");
 
             let mut context =
-                Context::new(&mainloop, "fluxo-rs").expect("Failed to create pulse context");
+                Context::new(&mainloop, "fluxo").expect("Failed to create pulse context");
 
             context
                 .connect(None, ContextFlag::NOFLAGS, None)

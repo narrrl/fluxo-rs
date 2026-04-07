@@ -64,31 +64,31 @@ jobs:
           VERSION: ${{ steps.get_version.outputs.VERSION }}
           TAG: ${{ steps.get_version.outputs.TAG }}
         run: |
-          PKG="fluxo-rs_${VERSION}_amd64"
+          PKG="fluxo_${VERSION}_amd64"
 
           mkdir -p "${PKG}/DEBIAN"
           mkdir -p "${PKG}/usr/bin"
 
-          cp target/release/fluxo-rs "${PKG}/usr/bin/"
-          strip "${PKG}/usr/bin/fluxo-rs"
+          cp target/release/fluxo "${PKG}/usr/bin/"
+          strip "${PKG}/usr/bin/fluxo"
 
           printf '%s\n' \
-            "Package: fluxo-rs" \
+            "Package: fluxo" \
             "Version: ${VERSION}" \
             "Section: utils" \
             "Priority: optional" \
             "Architecture: amd64" \
-            "Maintainer: fluxo-rs contributors" \
+            "Maintainer: fluxo contributors" \
             "Description: High-performance daemon/client for Waybar custom modules" \
-            " fluxo-rs is a compiled Rust daemon that polls system metrics and" \
+            " fluxo is a compiled Rust daemon that polls system metrics and" \
             " serves formatted JSON output to Waybar custom modules over a Unix" \
             " domain socket. Replaces shell scripts with a single binary." \
             > "${PKG}/DEBIAN/control"
 
           dpkg-deb --build "${PKG}"
 
-          mv "${PKG}.deb" "fluxo-rs-${TAG}-amd64.deb"
-          echo "Built: fluxo-rs-${TAG}-amd64.deb"
+          mv "${PKG}.deb" "fluxo-${TAG}-amd64.deb"
+          echo "Built: fluxo-${TAG}-amd64.deb"
 
       - name: Create Release and Upload Assets
         if: steps.check_release.outputs.EXISTS == 'false'
@@ -101,8 +101,8 @@ jobs:
             Commit: ${{ github.sha }}
             Branch: ${{ github.ref_name }}
           files: |
-            fluxo-rs-${{ steps.get_version.outputs.TAG }}-amd64.deb
-            target/release/fluxo-rs
+            fluxo-${{ steps.get_version.outputs.TAG }}-amd64.deb
+            target/release/fluxo
           draft: false
           prerelease: false
         env:
