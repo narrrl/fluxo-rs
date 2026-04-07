@@ -118,10 +118,8 @@ pub fn backoff_response(module_name: &str, cached: Option<WaybarOutput>) -> Stri
         cached.class = Some(format!("{} warning", class).trim().to_string());
         return serde_json::to_string(&cached).unwrap_or_else(|_| "{}".to_string());
     }
-    format!(
-        "{{\"text\":\"\u{200B}Cooling down ({})\u{200B}\",\"class\":\"error\"}}",
-        module_name
-    )
+    let zws = crate::output::ZERO_WIDTH_SPACE;
+    format!("{{\"text\":\"{zws}Cooling down ({module_name}){zws}\",\"class\":\"error\"}}")
 }
 
 /// Serialise a fallback response for a module that errored this request.
@@ -141,11 +139,6 @@ pub fn error_response(
 
     let error_msg = e.to_string();
     error!(module = module_name, error = %error_msg, "Module execution failed");
-    let err_out = WaybarOutput {
-        text: "\u{200B}Error\u{200B}".to_string(),
-        tooltip: Some(error_msg),
-        class: Some("error".to_string()),
-        percentage: None,
-    };
+    let err_out = WaybarOutput::error(&error_msg);
     serde_json::to_string(&err_out).unwrap_or_else(|_| "{}".to_string())
 }

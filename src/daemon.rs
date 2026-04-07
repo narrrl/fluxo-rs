@@ -529,7 +529,8 @@ async fn handle_request(
     match result {
         Ok(output) => serde_json::to_string(&output).unwrap_or_else(|_| "{}".to_string()),
         Err(crate::error::FluxoError::Disabled(_)) => {
-            "{\"text\":\"\",\"tooltip\":\"Module disabled\",\"class\":\"disabled\"}".to_string()
+            serde_json::to_string(&crate::output::WaybarOutput::disabled())
+                .unwrap_or_else(|_| "{}".to_string())
         }
         Err(e) => crate::health::error_response(module_name, &e, cached_output),
     }
